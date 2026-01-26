@@ -19,6 +19,54 @@ import {
 } from "qti-html-renderer";
 ```
 
+### Rendering for scoring UI
+
+Use this when you need prompt HTML, rubric criteria, choices, and optional explanation.
+
+```ts
+const parsed = renderQtiItemForScoring(xml);
+
+parsed.identifier;
+parsed.title;
+parsed.promptHtml;
+parsed.rubricCriteria;
+parsed.choices;
+parsed.candidateExplanationHtml;
+```
+
+You can customize generated HTML via options:
+
+```ts
+const parsed = renderQtiItemForScoring(xml, {
+  blankRenderer: (index) => `<input class="my-blank" data-blank="${index}" />`,
+  extendedTextRenderer: () => "<span class=answer-long>(long answer)</span>",
+  choiceListClassName: "my-choice-list",
+  preWithBlanksClassName: "my-pre-with-blanks",
+});
+```
+
+### Rendering for reports
+
+Use this when you need a full HTML fragment for reports with code highlighting hooks.
+
+```ts
+const reportItem = renderQtiItemForReport(xml, expectedIdentifier, {
+  clozeInputHtml: '<input class=cloze-input type=text readonly>',
+  choiceWrapperClassName: "choice-interaction",
+  codeBlockClassName: "code-block hljs",
+  codeBlockCodeClassName: "code-block-code",
+  inlineCodeClassName: "code-inline",
+  dataCodeLangAttribute: "data-code-lang",
+  itemBodyWrapperClassName: "item-body",
+  codeHighlighter: (code, explicitLanguage) => {
+    // return highlighted HTML plus language label
+    return { language: explicitLanguage ?? "plain", html: code };
+  },
+});
+
+reportItem.questionHtml;
+```
+
 ### HTML utilities
 
 ```ts
@@ -29,8 +77,27 @@ const rewritten = rewriteHtmlImageSources(html, baseFilePath, {
 const withResponses = applyResponsesToPromptHtml(promptHtml, responses);
 ```
 
-When running in Node.js, provide a DOMParser implementation via the `domParser` option
-(for example, from `linkedom` or `jsdom`).
+### Node.js DOMParser
+
+`applyResponsesToPromptHtml` and `rewriteHtmlImageSources` require a DOMParser in Node.js.
+Pass one via options:
+
+```ts
+import { JSDOM } from "jsdom";
+
+const domParser = new JSDOM("").window.DOMParser();
+
+const withResponses = applyResponsesToPromptHtml(promptHtml, responses, { domParser });
+const rewritten = rewriteHtmlImageSources(html, baseFilePath, {
+  domParser,
+  resolveUrl: (resolvedPath) => `/assets/${resolvedPath}`,
+});
+```
+
+### Return Types
+
+- `renderQtiItemForScoring` → `{ identifier, title, promptHtml, rubricCriteria, choices, candidateExplanationHtml }`
+- `renderQtiItemForReport` → `{ identifier, title, questionHtml, rubricCriteria, itemMaxScore, choices }`
 
 ## Development
 
