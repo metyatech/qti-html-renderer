@@ -5,7 +5,7 @@ Shared utilities for rendering QTI 3.0 assessment item XML into HTML.
 ## Install
 
 ```bash
-npm install github:metyatech/qti-html-renderer
+npm install qti-html-renderer
 ```
 
 ## Usage

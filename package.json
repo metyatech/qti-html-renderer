@@ -1,7 +1,17 @@
 {
   "name": "qti-html-renderer",
   "version": "0.1.0",
-  "private": true,
+  "description": "Reusable QTI 3.0 assessment item HTML rendering utilities.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/metyatech/qti-html-renderer.git"
+  },
+  "homepage": "https://github.com/metyatech/qti-html-renderer",
+  "bugs": {
+    "url": "https://github.com/metyatech/qti-html-renderer/issues"
+  },
+  "keywords": ["qti", "qti3", "qti-3", "html", "renderer", "education"],
   "type": "module",
   "exports": {
     ".": "./dist/index.js"
@@ -12,6 +22,9 @@
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test",
     "prepare": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.8",
