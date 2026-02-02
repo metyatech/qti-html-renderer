@@ -105,3 +105,18 @@ const rewritten = rewriteHtmlImageSources(html, baseFilePath, {
 npm run build
 npm test
 ```
+
+## Overview
+This repository contains the qti-html-renderer project.
+
+## Development Commands
+- Build: `npm run build`
+- Test: `npm run test`
+- Lint: `Not configured (no lint script in package.json).`
+
+## Requirements and Configuration
+- No required environment variables are documented.
+
+## Release and Deploy
+Not documented for this repository.
+
