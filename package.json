@@ -11,17 +11,34 @@
   "bugs": {
     "url": "https://github.com/metyatech/qti-html-renderer/issues"
   },
-  "keywords": ["qti", "qti3", "qti-3", "html", "renderer", "education"],
+  "keywords": [
+    "qti",
+    "qti3",
+    "qti-3",
+    "html",
+    "renderer",
+    "education"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "exports": {
     ".": "./dist/index.js"
   },
   "types": "./dist/index.d.ts",
-  "files": ["dist", "README.md", "LICENSE", "package.json"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "lint": "eslint .",
+    "format": "prettier --write ."
   },
   "publishConfig": {
     "access": "public"
@@ -31,7 +48,16 @@
     "qti-xml-core": "git+https://github.com/metyatech/qti-xml-core.git"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@typescript-eslint/eslint-plugin": "^8.55.0",
+    "@typescript-eslint/parser": "^8.55.0",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "globals": "^17.3.0",
     "jsdom": "^24.0.0",
-    "typescript": "^5"
+    "prettier": "^3.8.1",
+    "typescript": "^5",
+    "typescript-eslint": "^8.55.0"
   }
 }
