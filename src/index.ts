@@ -160,29 +160,6 @@ const extractChoices = (itemBody: Element): ChoiceOption[] => {
   }));
 };
 
-const detectCodeLanguage = (codeOpen: Element): string | null => {
-  const fromData =
-    codeOpen.getAttribute('data-lang') ??
-    codeOpen.getAttribute('data-language') ??
-    codeOpen.getAttribute('data-code-lang');
-  if (fromData) return fromData.trim();
-  const classAttr = codeOpen.getAttribute('class');
-  if (!classAttr) return null;
-  const tokens = classAttr.split(/\s+/);
-  for (const token of tokens) {
-    const match = token.match(/^(?:language|lang)-([A-Za-z0-9_-]+)$/);
-    if (match) return match[1];
-  }
-  return null;
-};
-
-const normalizeLanguage = (language: string): string => {
-  const normalized = language.toLowerCase();
-  if (normalized === 'xml') return 'html';
-  if (normalized === 'plaintext') return 'plain';
-  return normalized;
-};
-
 const renderNodeForScoring = (
   node: Node,
   options: Required<ScoringRenderOptions>,
@@ -260,8 +237,7 @@ const renderNodeForScoring = (
         .map((child, index) => {
           if (child.nodeType === NODE_TYPES.ELEMENT_NODE && (child as Element).localName === 'qti-code') {
             const prevBlank = index > 0 && isBlank(significantNodes[index - 1]);
-            const nextBlank =
-              index < significantNodes.length - 1 && isBlank(significantNodes[index + 1]);
+            const nextBlank = index < significantNodes.length - 1 && isBlank(significantNodes[index + 1]);
             return renderCodeInPre(child as Element, prevBlank, nextBlank);
           }
           return renderNodeForScoring(child, options, blankCounter, true, false);
@@ -328,10 +304,7 @@ const renderNodeForScoring = (
   }
 };
 
-const parseCandidateExplanation = (
-  root: Element,
-  options: Required<ScoringRenderOptions>,
-): string | null => {
+const parseCandidateExplanation = (root: Element, options: Required<ScoringRenderOptions>): string | null => {
   const modalFeedbacks = getElementsByLocalName(root, 'qti-modal-feedback');
   const explanationFeedback =
     modalFeedbacks.find(
@@ -347,15 +320,10 @@ const parseCandidateExplanation = (
   const explanationNodes = Array.from(contentBody.childNodes).filter(
     (node) => node.nodeType !== NODE_TYPES.TEXT_NODE || (node.textContent?.trim() ?? '') !== '',
   );
-  return explanationNodes
-    .map((node) => renderNodeForScoring(node, options, blankCounter))
-    .join('');
+  return explanationNodes.map((node) => renderNodeForScoring(node, options, blankCounter)).join('');
 };
 
-export const renderQtiItemForScoring = (
-  xml: string,
-  options: ScoringRenderOptions = {},
-): ParsedItemForScoring => {
+export const renderQtiItemForScoring = (xml: string, options: ScoringRenderOptions = {}): ParsedItemForScoring => {
   const resolved = { ...defaultScoringOptions, ...options };
   const doc = parseXml(xml);
   const root = doc.documentElement;
@@ -478,33 +446,33 @@ const enhanceCodeBlocks = (
   codeHighlighter?: (code: string, explicitLanguage: string | null) => CodeHighlightResult,
 ): string => {
   const preCodePattern = /(<pre\b[^>]*>)(\s*)(<code\b[^>]*>)([\s\S]*?)(<\/code>)/g;
-  return htmlFragment.replace(
-    preCodePattern,
-    (_match, preOpen, whitespace, codeOpen, codeContent, codeClose) => {
-      const explicitLanguage = detectCodeLanguageFromOpenTag(codeOpen);
-      let language = explicitLanguage ? normalizeLanguageForReport(explicitLanguage) : 'plain';
-      let content = codeContent;
-      if (codeHighlighter) {
-        const highlighted = codeHighlighter(decodeXmlEntities(codeContent), explicitLanguage);
-        language = normalizeLanguageForReport(highlighted.language ?? language);
-        content = highlighted.html.length > 0 ? highlighted.html : codeContent;
-      }
-      const enhancedPre = addOrUpdateAttribute(
-        addClasses(preOpen, options.codeBlockClassName.split(/\s+/)),
-        options.dataCodeLangAttribute,
-        language,
-      );
-      const enhancedCode = addOrUpdateAttribute(
-        addClasses(codeOpen, options.codeBlockCodeClassName.split(/\s+/)),
-        options.dataCodeLangAttribute,
-        language,
-      );
-      return `${enhancedPre}${whitespace}${enhancedCode}${content}${codeClose}`;
-    },
-  );
+  return htmlFragment.replace(preCodePattern, (_match, preOpen, whitespace, codeOpen, codeContent, codeClose) => {
+    const explicitLanguage = detectCodeLanguageFromOpenTag(codeOpen);
+    let language = explicitLanguage ? normalizeLanguageForReport(explicitLanguage) : 'plain';
+    let content = codeContent;
+    if (codeHighlighter) {
+      const highlighted = codeHighlighter(decodeXmlEntities(codeContent), explicitLanguage);
+      language = normalizeLanguageForReport(highlighted.language ?? language);
+      content = highlighted.html.length > 0 ? highlighted.html : codeContent;
+    }
+    const enhancedPre = addOrUpdateAttribute(
+      addClasses(preOpen, options.codeBlockClassName.split(/\s+/)),
+      options.dataCodeLangAttribute,
+      language,
+    );
+    const enhancedCode = addOrUpdateAttribute(
+      addClasses(codeOpen, options.codeBlockCodeClassName.split(/\s+/)),
+      options.dataCodeLangAttribute,
+      language,
+    );
+    return `${enhancedPre}${whitespace}${enhancedCode}${content}${codeClose}`;
+  });
 };
 
-const enhanceInlineCode = (htmlFragment: string, options: Required<Omit<ReportRenderOptions, 'codeHighlighter'>>): string => {
+const enhanceInlineCode = (
+  htmlFragment: string,
+  options: Required<Omit<ReportRenderOptions, 'codeHighlighter'>>,
+): string => {
   const codeOpenPattern = /<code\b[^>]*>/g;
   return htmlFragment.replace(codeOpenPattern, (codeOpen) => {
     const attributes = parseAttributes(codeOpen);
@@ -515,11 +483,7 @@ const enhanceInlineCode = (htmlFragment: string, options: Required<Omit<ReportRe
     const language = detectCodeLanguageFromOpenTag(codeOpen);
     const enhancedCode = addClasses(codeOpen, options.inlineCodeClassName.split(/\s+/));
     if (!language) return enhancedCode;
-    return addOrUpdateAttribute(
-      enhancedCode,
-      options.dataCodeLangAttribute,
-      normalizeLanguageForReport(language),
-    );
+    return addOrUpdateAttribute(enhancedCode, options.dataCodeLangAttribute, normalizeLanguageForReport(language));
   });
 };
 
@@ -548,9 +512,7 @@ const renderNodeForReport = (
     case 'qti-rubric-block':
       return '';
     case 'qti-choice-interaction': {
-      const classAttr = options.choiceWrapperClassName
-        ? ` class="${escapeHtml(options.choiceWrapperClassName)}"`
-        : '';
+      const classAttr = options.choiceWrapperClassName ? ` class="${escapeHtml(options.choiceWrapperClassName)}"` : '';
       return `<div${classAttr}>${renderChildren()}</div>`;
     }
     case 'qti-text-entry-interaction':

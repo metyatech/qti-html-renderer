@@ -16,7 +16,7 @@ import {
   renderQtiItemForReport,
   renderQtiItemForScoring,
   rewriteHtmlImageSources,
-} from "qti-html-renderer";
+} from 'qti-html-renderer';
 ```
 
 ### Rendering for scoring UI
@@ -39,9 +39,9 @@ You can customize generated HTML via options:
 ```ts
 const parsed = renderQtiItemForScoring(xml, {
   blankRenderer: (index) => `<input class="my-blank" data-blank="${index}" />`,
-  extendedTextRenderer: () => "<span class=answer-long>(long answer)</span>",
-  choiceListClassName: "my-choice-list",
-  preWithBlanksClassName: "my-pre-with-blanks",
+  extendedTextRenderer: () => '<span class=answer-long>(long answer)</span>',
+  choiceListClassName: 'my-choice-list',
+  preWithBlanksClassName: 'my-pre-with-blanks',
 });
 ```
 
@@ -52,15 +52,15 @@ Use this when you need a full HTML fragment for reports with code highlighting h
 ```ts
 const reportItem = renderQtiItemForReport(xml, expectedIdentifier, {
   clozeInputHtml: '<input class=cloze-input type=text readonly>',
-  choiceWrapperClassName: "choice-interaction",
-  codeBlockClassName: "code-block hljs",
-  codeBlockCodeClassName: "code-block-code",
-  inlineCodeClassName: "code-inline",
-  dataCodeLangAttribute: "data-code-lang",
-  itemBodyWrapperClassName: "item-body",
+  choiceWrapperClassName: 'choice-interaction',
+  codeBlockClassName: 'code-block hljs',
+  codeBlockCodeClassName: 'code-block-code',
+  inlineCodeClassName: 'code-inline',
+  dataCodeLangAttribute: 'data-code-lang',
+  itemBodyWrapperClassName: 'item-body',
   codeHighlighter: (code, explicitLanguage) => {
     // return highlighted HTML plus language label
-    return { language: explicitLanguage ?? "plain", html: code };
+    return { language: explicitLanguage ?? 'plain', html: code };
   },
 });
 
@@ -83,9 +83,9 @@ const withResponses = applyResponsesToPromptHtml(promptHtml, responses);
 Pass one via options:
 
 ```ts
-import { JSDOM } from "jsdom";
+import { JSDOM } from 'jsdom';
 
-const domParser = new JSDOM("").window.DOMParser();
+const domParser = new JSDOM('').window.DOMParser();
 
 const withResponses = applyResponsesToPromptHtml(promptHtml, responses, { domParser });
 const rewritten = rewriteHtmlImageSources(html, baseFilePath, {
@@ -104,19 +104,13 @@ const rewritten = rewriteHtmlImageSources(html, baseFilePath, {
 ```bash
 npm run build
 npm test
+npm run lint
+npm run format
 ```
 
-## Overview
-This repository contains the qti-html-renderer project.
+## Maintenance and Policies
 
-## Development Commands
-- Build: `npm run build`
-- Test: `npm run test`
-- Lint: `Not configured (no lint script in package.json).`
-
-## Requirements and Configuration
-- No required environment variables are documented.
-
-## Release and Deploy
-Not documented for this repository.
-
+- [SECURITY.md](SECURITY.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [LICENSE](LICENSE)
+- [CHANGELOG.md](CHANGELOG.md)
