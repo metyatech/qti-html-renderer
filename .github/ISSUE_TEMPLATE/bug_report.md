@@ -1,7 +1,7 @@
 ---
 name: Bug report
 about: Report a problem
-title: "Bug: "
+title: 'Bug: '
 labels: bug
 ---
 
@@ -14,5 +14,6 @@ labels: bug
 ## Actual Behavior
 
 ## Environment
+
 - Node.js version:
 - Package version:

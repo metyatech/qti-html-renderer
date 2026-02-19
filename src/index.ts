@@ -94,7 +94,9 @@ const resolveHtmlDomParser = (domParser?: HtmlDomParser): HtmlDomParser => {
   if (typeof globalThis.DOMParser === 'function') {
     return new globalThis.DOMParser();
   }
-  throw new Error('DOMParser is not available. Provide a domParser option (e.g. from linkedom/jsdom).');
+  throw new Error(
+    'DOMParser is not available. Provide a domParser option (e.g. from linkedom/jsdom).',
+  );
 };
 
 const defaultIsExternalSource = (src: string) =>
@@ -160,29 +162,6 @@ const extractChoices = (itemBody: Element): ChoiceOption[] => {
   }));
 };
 
-const detectCodeLanguage = (codeOpen: Element): string | null => {
-  const fromData =
-    codeOpen.getAttribute('data-lang') ??
-    codeOpen.getAttribute('data-language') ??
-    codeOpen.getAttribute('data-code-lang');
-  if (fromData) return fromData.trim();
-  const classAttr = codeOpen.getAttribute('class');
-  if (!classAttr) return null;
-  const tokens = classAttr.split(/\s+/);
-  for (const token of tokens) {
-    const match = token.match(/^(?:language|lang)-([A-Za-z0-9_-]+)$/);
-    if (match) return match[1];
-  }
-  return null;
-};
-
-const normalizeLanguage = (language: string): string => {
-  const normalized = language.toLowerCase();
-  if (normalized === 'xml') return 'html';
-  if (normalized === 'plaintext') return 'plain';
-  return normalized;
-};
-
 const renderNodeForScoring = (
   node: Node,
   options: Required<ScoringRenderOptions>,
@@ -232,7 +211,8 @@ const renderNodeForScoring = (
       return `<code>${renderChildren(inPre, true)}</code>`;
     case 'qti-pre': {
       const isBlank = (child: Node) =>
-        child.nodeType === NODE_TYPES.ELEMENT_NODE && (child as Element).localName === 'qti-text-entry-interaction';
+        child.nodeType === NODE_TYPES.ELEMENT_NODE &&
+        (child as Element).localName === 'qti-text-entry-interaction';
       const significantNodes = Array.from(el.childNodes).filter((child) => {
         if (child.nodeType !== NODE_TYPES.TEXT_NODE) return true;
         return (child.textContent ?? '').trim() !== '';
@@ -258,7 +238,10 @@ const renderNodeForScoring = (
       const hasBlank = significantNodes.some((child) => isBlank(child));
       const rendered = significantNodes
         .map((child, index) => {
-          if (child.nodeType === NODE_TYPES.ELEMENT_NODE && (child as Element).localName === 'qti-code') {
+          if (
+            child.nodeType === NODE_TYPES.ELEMENT_NODE &&
+            (child as Element).localName === 'qti-code'
+          ) {
             const prevBlank = index > 0 && isBlank(significantNodes[index - 1]);
             const nextBlank =
               index < significantNodes.length - 1 && isBlank(significantNodes[index + 1]);
@@ -347,9 +330,7 @@ const parseCandidateExplanation = (
   const explanationNodes = Array.from(contentBody.childNodes).filter(
     (node) => node.nodeType !== NODE_TYPES.TEXT_NODE || (node.textContent?.trim() ?? '') !== '',
   );
-  return explanationNodes
-    .map((node) => renderNodeForScoring(node, options, blankCounter))
-    .join('');
+  return explanationNodes.map((node) => renderNodeForScoring(node, options, blankCounter)).join('');
 };
 
 export const renderQtiItemForScoring = (
@@ -415,7 +396,11 @@ const extractInnerXml = (tagBlock: string, tagName: string): string => {
   return match[1];
 };
 
-const addOrUpdateAttribute = (tagOpen: string, attributeName: string, attributeValue: string): string => {
+const addOrUpdateAttribute = (
+  tagOpen: string,
+  attributeName: string,
+  attributeValue: string,
+): string => {
   const attributePattern = new RegExp(`\\s${attributeName}="[^"]*"`);
   if (attributePattern.test(tagOpen)) {
     return tagOpen.replace(attributePattern, ` ${attributeName}="${attributeValue}"`);
@@ -433,7 +418,8 @@ const addClasses = (tagOpen: string, classNames: string[]): string => {
 
 const detectCodeLanguageFromOpenTag = (tagOpen: string): string | null => {
   const attributes = parseAttributes(tagOpen);
-  const fromData = attributes['data-lang'] ?? attributes['data-language'] ?? attributes['data-code-lang'];
+  const fromData =
+    attributes['data-lang'] ?? attributes['data-language'] ?? attributes['data-code-lang'];
   if (fromData) return fromData.trim();
   const classAttr = attributes.class;
   if (!classAttr) return null;
@@ -504,7 +490,10 @@ const enhanceCodeBlocks = (
   );
 };
 
-const enhanceInlineCode = (htmlFragment: string, options: Required<Omit<ReportRenderOptions, 'codeHighlighter'>>): string => {
+const enhanceInlineCode = (
+  htmlFragment: string,
+  options: Required<Omit<ReportRenderOptions, 'codeHighlighter'>>,
+): string => {
   const codeOpenPattern = /<code\b[^>]*>/g;
   return htmlFragment.replace(codeOpenPattern, (codeOpen) => {
     const attributes = parseAttributes(codeOpen);
@@ -600,7 +589,9 @@ export const renderQtiItemForReport = (
     throw new Error(`Invalid assessment item: identifier missing in ${expectedIdentifier}`);
   }
   if (identifier !== expectedIdentifier) {
-    throw new Error(`Assessment item identifier mismatch: expected ${expectedIdentifier} but found ${identifier}`);
+    throw new Error(
+      `Assessment item identifier mismatch: expected ${expectedIdentifier} but found ${identifier}`,
+    );
   }
   const itemBody = getElementsByLocalName(root, 'qti-item-body')[0];
   if (!itemBody) {
