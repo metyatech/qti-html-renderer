@@ -43,6 +43,9 @@
   "publishConfig": {
     "access": "public"
   },
+  "overrides": {
+    "minimatch": "^10.2.1"
+  },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.8",
     "qti-xml-core": "git+https://github.com/metyatech/qti-xml-core.git"
