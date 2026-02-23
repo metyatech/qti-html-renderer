@@ -1,6 +1,6 @@
 {
   "name": "qti-html-renderer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Reusable QTI 3.0 assessment item HTML rendering utilities.",
   "license": "MIT",
   "repository": {
