@@ -38,7 +38,9 @@
     "test": "npm run build && node --test",
     "prepare": "npm run build",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "verify": "prettier --check . && npm run lint && npm run typecheck && npm run test"
   },
   "publishConfig": {
     "access": "public"
