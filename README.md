@@ -102,6 +102,7 @@ const rewritten = rewriteHtmlImageSources(html, baseFilePath, {
 ## Development
 
 ```bash
+npm run verify
 npm run build
 npm test
 npm run lint
