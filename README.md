@@ -31,6 +31,7 @@ parsed.title;
 parsed.promptHtml;
 parsed.rubricCriteria;
 parsed.choices;
+parsed.interactions;
 parsed.candidateExplanationHtml;
 ```
 
@@ -96,7 +97,7 @@ const rewritten = rewriteHtmlImageSources(html, baseFilePath, {
 
 ### Return Types
 
-- `renderQtiItemForScoring` → `{ identifier, title, promptHtml, rubricCriteria, choices, candidateExplanationHtml }`
+- `renderQtiItemForScoring` → `{ identifier, title, promptHtml, rubricCriteria, choices, interactions, candidateExplanationHtml }`
 - `renderQtiItemForReport` → `{ identifier, title, questionHtml, rubricCriteria, itemMaxScore, choices }`
 
 ## Development

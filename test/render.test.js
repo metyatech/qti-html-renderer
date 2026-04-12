@@ -29,6 +29,40 @@ test('renderQtiItemForScoring renders blanks and choices', () => {
   assert.equal(parsed.rubricCriteria.length, 1);
 });
 
+test('renderQtiItemForScoring exposes interaction metadata in document order', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-2" title="Item 2">
+  <qti-response-declaration identifier="CHOICE">
+    <qti-correct-response>
+      <qti-value>B</qti-value>
+    </qti-correct-response>
+  </qti-response-declaration>
+  <qti-response-declaration identifier="BLANK">
+    <qti-correct-response>
+      <qti-value>TypeScript</qti-value>
+    </qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-choice-interaction response-identifier="CHOICE" max-choices="1">
+      <qti-simple-choice identifier="A">Alpha</qti-simple-choice>
+      <qti-simple-choice identifier="B">Beta</qti-simple-choice>
+    </qti-choice-interaction>
+    <qti-p><qti-text-entry-interaction response-identifier="BLANK"/></qti-p>
+  </qti-item-body>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+
+  assert.deepEqual(parsed.interactions, [
+    { id: 'CHOICE', type: 'choiceInteraction', correctResponse: ['B'] },
+    { id: 'BLANK', type: 'textEntryInteraction', correctResponse: ['TypeScript'] },
+  ]);
+  assert.match(parsed.promptHtml, /data-interaction-id="CHOICE"/);
+  assert.match(parsed.promptHtml, /data-interaction-id="BLANK"/);
+  assert.match(parsed.promptHtml, /data-identifier="A"/);
+  assert.match(parsed.promptHtml, /data-identifier="B"/);
+});
+
 test('renderQtiItemForReport uses highlighter and cloze input', () => {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-7" title="Item 7">

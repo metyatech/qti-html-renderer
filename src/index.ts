@@ -12,12 +12,19 @@ export interface ChoiceOption {
   text: string;
 }
 
+export interface InteractionInfo {
+  id: string;
+  type: string;
+  correctResponse: string[];
+}
+
 export interface ParsedItemForScoring {
   identifier: string;
   title: string;
   promptHtml: string;
   rubricCriteria: RubricCriterion[];
   choices: ChoiceOption[];
+  interactions: InteractionInfo[];
   candidateExplanationHtml: string | null;
 }
 
@@ -160,6 +167,43 @@ const extractChoices = (itemBody: Element): ChoiceOption[] => {
   }));
 };
 
+const extractInteractions = (root: Element): InteractionInfo[] => {
+  const interactions: InteractionInfo[] = [];
+  const responseDeclarations = getElementsByLocalName(root, 'qti-response-declaration');
+
+  // Map response identifiers to correct values
+  const correctMap = new Map<string, string[]>();
+  for (const decl of responseDeclarations) {
+    const id = decl.getAttribute('identifier');
+    const correctResponse = getElementsByLocalName(decl, 'qti-correct-response')[0];
+    if (id && correctResponse) {
+      const values = getElementsByLocalName(correctResponse, 'qti-value').map((v) => v.textContent?.trim() ?? '');
+      correctMap.set(id, values);
+    }
+  }
+
+  // Find actual interactions in the body in document order
+  const itemBody = getElementsByLocalName(root, 'qti-item-body')[0];
+  if (!itemBody) return [];
+
+  // インタラクション要素を確実に取得 (接頭辞 qti- の有無を問わない)
+  const allTags = Array.from(itemBody.getElementsByTagName('*'));
+  const allInteractionTags = allTags.filter((el) => el.localName.toLowerCase().includes('interaction'));
+
+  for (const el of allInteractionTags) {
+    const responseId = el.getAttribute('response-identifier');
+    if (responseId) {
+      interactions.push({
+        id: responseId,
+        type: el.localName.toLowerCase().includes('choice') ? 'choiceInteraction' : 'textEntryInteraction',
+        correctResponse: correctMap.get(responseId) ?? [],
+      });
+    }
+  }
+
+  return interactions;
+};
+
 const renderNodeForScoring = (
   node: Node,
   options: Required<ScoringRenderOptions>,
@@ -280,11 +324,17 @@ const renderNodeForScoring = (
     }
     case 'qti-text-entry-interaction': {
       const idx = ++blankCounter.value;
-      return options.blankRenderer(idx);
+      const responseId = el.getAttribute('response-identifier') ?? '';
+      // data-interaction-id を追加して、親のハンドラが識別できるようにする
+      // また、class にも識別用クラスを追加
+      const defaultHtml = options.blankRenderer(idx);
+      // 単純な置換だと危険なので、inputタグである前提で属性を注入
+      return defaultHtml.replace('<input', `<input data-interaction-id="${escapeHtml(responseId)}"`);
     }
     case 'qti-extended-text-interaction':
       return options.extendedTextRenderer();
     case 'qti-choice-interaction': {
+      const responseId = el.getAttribute('response-identifier') ?? '';
       const choices = getElementsByLocalName(el, 'qti-simple-choice');
       const listItems = choices
         .map((choice) => {
@@ -292,10 +342,11 @@ const renderNodeForScoring = (
           const text = Array.from(choice.childNodes)
             .map((child) => renderNodeForScoring(child, options, blankCounter))
             .join('');
-          return `<li data-choice="${escapeHtml(id)}">${text}</li>`;
+          return `<li data-choice="${escapeHtml(id)}" data-identifier="${escapeHtml(id)}">${text}</li>`;
         })
         .join('');
-      return `<ol class="${options.choiceListClassName}">${listItems}</ol>`;
+      // 親コンテナに interaction ID を持たせる
+      return `<ol class="${options.choiceListClassName}" data-interaction-id="${escapeHtml(responseId)}">${listItems}</ol>`;
     }
     case 'qti-rubric-block':
       return '';
@@ -342,6 +393,7 @@ export const renderQtiItemForScoring = (xml: string, options: ScoringRenderOptio
     .join('');
   const rubricCriteria = extractRubricCriteria(itemBody);
   const choices = extractChoices(itemBody);
+  const interactions = extractInteractions(root);
   const candidateExplanationHtml = parseCandidateExplanation(root, resolved);
 
   return {
@@ -350,6 +402,7 @@ export const renderQtiItemForScoring = (xml: string, options: ScoringRenderOptio
     promptHtml,
     rubricCriteria,
     choices,
+    interactions,
     candidateExplanationHtml,
   };
 };
