@@ -230,20 +230,26 @@ npm run lint
 npm run format
 ```
 
-## Publishing
+## Release
 
-The package is published from a clean `main` after CI is green. The
-recommended sequence is:
+This package is published **only** by GitHub Actions through npm Trusted
+Publisher (OIDC). Local `npm publish` is not allowed, and no npm token is
+required or used anywhere (no `NPM_TOKEN`, no `NODE_AUTH_TOKEN`, no token in
+`.npmrc`).
 
-```bash
-npm ci
-npm run build     # explicit; `prepack` also runs it automatically before `npm pack`/`npm publish`
-npm publish --access public
-```
+Release steps:
 
-`prepack` runs `npm run build` automatically, so a fresh checkout that has
-not built `dist/` can still be packed or published. There is no
-`prepublishOnly` step.
+1. Set the same version in `package.json`, `package-lock.json`, and
+   `CHANGELOG.md`.
+2. Push the change to `main` and wait for the normal CI to pass.
+3. Create and push the matching `v<version>` annotated tag (for example
+   `v0.1.3`).
+4. The tag push triggers `.github/workflows/publish.yml`, which automatically
+   verifies tag/version agreement and package contents, publishes via OIDC,
+   and re-verifies the published artifact from the registry.
+
+An already-published version cannot be re-published; the workflow fails before
+publish if the version already exists on the registry.
 
 ## Maintenance and Policies
 

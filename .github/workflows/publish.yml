@@ -1,0 +1,86 @@
+name: Publish
+
+# npm Trusted Publisher (OIDC) release workflow.
+#
+# Triggered ONLY by pushing a v* tag. Branch pushes and pull requests never
+# publish, and there is intentionally no workflow_dispatch trigger. No npm
+# token is created, referenced, or stored anywhere: publishing authenticates
+# through OIDC (id-token: write) against the npm Trusted Publisher configured
+# for metyatech/qti-html-renderer with workflow filename publish.yml.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          # Release workflow: do NOT enable any package manager cache.
+
+      - name: Pin npm to 11.5.1+ and show runtime versions
+        run: |
+          npm install -g npm@^11.5.1
+          node --version
+          npm --version
+          NPM_VERSION="$(npm --version)"
+          node -e "const [a,b,c]=process.env.NPM_VERSION.split('.').map(Number); const ok = a>11 || (a===11 && (b>5 || (b===5 && c>=1))); if(!ok){console.error('npm '+process.env.NPM_VERSION+' is below required 11.5.1'); process.exit(1);} console.log('npm version OK: '+process.env.NPM_VERSION);"
+        env:
+          NPM_VERSION: ''
+
+      - name: Verify tag format and version agreement
+        run: |
+          node "$GITHUB_WORKSPACE/.github/scripts/check-version.mjs"
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit
+        run: npm audit --audit-level=high
+
+      - name: Verify (prettier, lint, typecheck, tests)
+        run: npm run verify
+
+      - name: Strict pack content verification
+        run: |
+          # Pack from a clean state so prepack rebuilds dist/ on its own.
+          rm -rf dist
+          PACK_JSON="$RUNNER_TEMP/pack.json"
+          npm pack --dry-run --json > "$PACK_JSON"
+          PACK_JSON="$PACK_JSON" node "$GITHUB_WORKSPACE/.github/scripts/check-pack.mjs"
+          # Remove any tarball npm may have produced; keep the tree clean.
+          rm -f "$RUNNER_TEMP"/*.tgz qti-html-renderer-*.tgz || true
+
+      - name: Reject already-published version
+        run: |
+          set -euo pipefail
+          EXISTING="$(npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version 2>/dev/null || true)"
+          if [ -n "$EXISTING" ]; then
+            echo "Version ${PACKAGE_NAME}@${PACKAGE_VERSION} is already published; refusing to republish."
+            exit 1
+          fi
+          echo "${PACKAGE_NAME}@${PACKAGE_VERSION} is not yet published; continuing."
+
+      - name: Publish to npm via OIDC
+        run: npm publish
+
+      - name: Verify published artifact
+        run: |
+          node "$GITHUB_WORKSPACE/.github/scripts/check-published.mjs"
+        env:
+          REPO_SLUG: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
