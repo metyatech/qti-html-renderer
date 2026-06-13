@@ -88,22 +88,35 @@ Two binding rules apply:
 
 - **Direct match** — when the interaction's `response-identifier` equals a
   `qti-response-declaration` identifier, the interaction gets the matching
-  declaration's values in full.
+  declaration's values in full. A direct match is only honored when the
+  identifier was carried by exactly one `qti-response-declaration` element
+  in the XML. When two or more `qti-response-declaration` elements share
+  the same identifier, the structure is ambiguous and the renderer does
+  NOT silently pick one and discard the others: the duplicate count is
+  tracked per identifier, the identifier is removed from the trusted
+  direct-match set, and the affected interactions are reported as
+  unmatched (`declarationIdentifier: null`, `correctResponse: []`). This
+  applies to both choice and text-entry interactions — there is no
+  last-wins fallback for duplicated identifiers.
 - **Legacy ordered `RESPONSE` distribution** — applies only to the pure cloze
   shape it was designed for. ALL of the following must hold: there is exactly
-  one `qti-response-declaration`; its `identifier` is exactly `RESPONSE` with
-  `cardinality="ordered"` and `base-type="string"`; no interaction matches a
-  declaration directly; every interaction in the item is unmatched; every
-  interaction's published `type` is exactly `text-entry` (custom or
-  non-standard interactions reported as `other` are excluded); the unmatched
-  `response-identifier`s are exactly `RESPONSE_1`..`RESPONSE_N` in document
-  order with no gaps and no duplicates; and the value count equals the
-  interaction count. Then the declaration's values are distributed to the
-  interactions in document order and `declarationValueIndex` records the
-  0-based position assigned to each one. If any interaction matches a
-  declaration directly — for example a literal `RESPONSE` interaction next to
-  a `RESPONSE_1` interaction — the fallback does not fire: the `RESPONSE`
-  interaction wins by direct match and `RESPONSE_1` stays unmatched.
+  one `qti-response-declaration` element in the XML (this is a raw element
+  count, not a `Map.size` check — two declarations sharing an identifier
+  collapse to a single `Map` entry and would otherwise pass an equality test
+  the XML does not actually satisfy); its `identifier` is exactly `RESPONSE`
+  with `cardinality="ordered"` and `base-type="string"`; no interaction
+  matches a declaration directly; every interaction in the item is
+  unmatched; every interaction's published `type` is exactly `text-entry`
+  (custom or non-standard interactions reported as `other` are excluded);
+  the unmatched `response-identifier`s are exactly `RESPONSE_1`..`RESPONSE_N`
+  in document order with no gaps and no duplicates; and the value count
+  equals the interaction count. Then the declaration's values are
+  distributed to the interactions in document order and
+  `declarationValueIndex` records the 0-based position assigned to each
+  one. If any interaction matches a declaration directly — for example a
+  literal `RESPONSE` interaction next to a `RESPONSE_1` interaction — the
+  fallback does not fire: the `RESPONSE` interaction wins by direct match
+  and `RESPONSE_1` stays unmatched.
 
 If neither rule applies, the interaction's `declarationIdentifier`,
 `declarationValueIndex`, `cardinality`, and `baseType` are `null` and
@@ -134,7 +147,15 @@ explanation.explanationHtml; // null when the item has no qti-modal-feedback
 
 `explanationHtml` is `null` when the item has no `qti-modal-feedback`, no
 `qti-content-body`, or the body is empty / contains only whitespace text
-nodes / contains only XML comments.
+nodes / contains only XML comments. The meaningful-content check is kept in
+sync with what the report and scoring renderers actually emit, so an
+explanation body whose only content is a self-displaying element such as
+`qti-img`, `qti-hr`, or `qti-br` is reported as meaningful (non-`null`,
+non-empty HTML) in both `renderQtiItemForExplanations.explanationHtml` and
+`renderQtiItemForScoring.candidateExplanationHtml`. Conversely, a body that
+contains only `qti-rubric-block` (which every renderer collapses to `''`)
+or only empty container elements (`qti-p`, `qti-div`, lists, tables) is
+still reported as `null` in both paths.
 
 ### HTML utilities
 

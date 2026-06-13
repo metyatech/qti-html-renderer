@@ -285,10 +285,16 @@ const isLegacyOrderedResponse = (
 
 const extractInteractions = (root: Element): InteractionInfo[] => {
   const responseDeclarations = getElementsByLocalName(root, 'qti-response-declaration');
+  // Track both the effective (last-wins-when-unambiguous) declaration map and
+  // the raw duplicate-identifier count. When two or more response-declaration
+  // elements share the same identifier the QTI structure is ambiguous: the
+  // renderer must not silently pick one and discard the others, so the
+  // interaction binding for that identifier is treated as unresolved.
   const declarationByIdentifier = new Map<
     string,
     { identifier: string; cardinality: Cardinality | null; baseType: string | null; values: string[] }
   >();
+  const declarationElementCountByIdentifier = new Map<string, number>();
   for (const decl of responseDeclarations) {
     const identifier = decl.getAttribute('identifier');
     if (!identifier) continue;
@@ -299,7 +305,10 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
       baseType,
       values: readDeclarationValues(decl, baseType),
     });
+    declarationElementCountByIdentifier.set(identifier, (declarationElementCountByIdentifier.get(identifier) ?? 0) + 1);
   }
+  const hasDuplicateDeclaration = (identifier: string): boolean =>
+    (declarationElementCountByIdentifier.get(identifier) ?? 0) > 1;
 
   const itemBody = getElementsByLocalName(root, 'qti-item-body')[0];
   if (!itemBody) return [];
@@ -322,28 +331,45 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
     };
   });
 
-  const directMatchIds = new Set<string>();
+  // A direct identifier match is only trustworthy when exactly one
+  // qti-response-declaration element carried that identifier. Duplicates
+  // surface as ambiguous; their interactions are reported as unmatched so
+  // consumers can flag the item instead of trusting a last-wins fallback.
+  const trustworthyDirectMatchIds = new Set<string>();
   for (const info of interactionInfo) {
-    if (info.responseId && declarationByIdentifier.has(info.responseId)) {
-      directMatchIds.add(info.responseId);
+    if (info.responseId && declarationByIdentifier.has(info.responseId) && !hasDuplicateDeclaration(info.responseId)) {
+      trustworthyDirectMatchIds.add(info.responseId);
     }
   }
 
   const unmatchedInfo = interactionInfo.filter(
-    (info) => info.responseId && !declarationByIdentifier.has(info.responseId),
+    (info) => info.responseId && !trustworthyDirectMatchIds.has(info.responseId),
   );
   const unmatchedIds = unmatchedInfo.map((info) => info.responseId);
 
   let legacyDistribution: Map<string, number> | null = null;
   // The legacy ordered RESPONSE distribution only applies when the item is the
-  // pure cloze shape it was designed for: a single RESPONSE declaration with no
-  // direct interaction match at all, and every interaction in the item is an
-  // unmatched text-entry whose response-identifier is RESPONSE_1..RESPONSE_N.
-  // If any interaction matches a declaration directly (e.g. a literal RESPONSE
-  // interaction alongside a RESPONSE_1 one), the fallback must not fire; the
-  // directly matched interactions win and the rest stay unmatched.
-  const hasSingleResponseDeclaration = declarationByIdentifier.size === 1;
-  const noDirectMatches = directMatchIds.size === 0;
+  // pure cloze shape it was designed for:
+  //   1. There is exactly one qti-response-declaration element in the XML
+  //      (responseDeclarations.length === 1). A Map.size check is not
+  //      sufficient: two declarations sharing the same identifier collapse to
+  //      a single entry and would pass an equality test that the XML does
+  //      not actually satisfy.
+  //   2. Its identifier is exactly RESPONSE with cardinality="ordered" and
+  //      base-type="string".
+  //   3. No interaction matches a declaration directly.
+  //   4. Every interaction in the item is unmatched.
+  //   5. Every interaction's published type is exactly text-entry (custom /
+  //      non-standard interactions reported as "other" are excluded).
+  //   6. The unmatched response-identifiers are RESPONSE_1..RESPONSE_N in
+  //      document order with no gaps or duplicates.
+  //   7. The value count equals the interaction count.
+  // If any of these conditions fails — in particular when multiple
+  // qti-response-declaration elements exist or when a literal RESPONSE
+  // interaction matches directly — the fallback does not fire and the
+  // affected interactions stay unmatched.
+  const hasSingleResponseDeclaration = responseDeclarations.length === 1;
+  const noDirectMatches = trustworthyDirectMatchIds.size === 0;
   const everyInteractionIsUnmatched = unmatchedInfo.length === interactionInfo.length;
   const everyInteractionIsTextEntry =
     interactionInfo.length > 0 && interactionInfo.every((info) => info.type === 'text-entry');
@@ -376,7 +402,11 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
     }
 
     const directDeclaration = declarationByIdentifier.get(info.responseId);
-    if (directDeclaration) {
+    // A direct match is only honored when the identifier was carried by
+    // exactly one qti-response-declaration element. Trustworthy ids were
+    // collected up front; anything else is ambiguous and falls through to
+    // the unmatched path.
+    if (directDeclaration && trustworthyDirectMatchIds.has(info.responseId)) {
       return {
         id: info.responseId,
         type: info.type,
@@ -532,6 +562,8 @@ const renderNodeForScoring = (
       return `<td>${renderChildren()}</td>`;
     case 'qti-hr':
       return '<hr />';
+    case 'qti-br':
+      return '<br />';
     case 'qti-img': {
       const src = el.getAttribute('src') ?? '';
       const alt = el.getAttribute('alt') ?? '';

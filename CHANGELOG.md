@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.1.4 — 2026-06-13
+
+### Fixed
+
+- Duplicate `<qti-response-declaration>` handling. When two or more
+  `qti-response-declaration` elements share the same `identifier`, the
+  structure is ambiguous and the renderer no longer silently picks one and
+  discards the others. The duplicate count is tracked per identifier; the
+  affected identifier is removed from the trusted direct-match set, and the
+  binding loop now refuses to honor a direct match on a duplicated
+  identifier. The interaction is reported as unmatched
+  (`declarationIdentifier: null`, `declarationValueIndex: null`,
+  `cardinality: null`, `baseType: null`, `correctResponse: []`). The legacy
+  ordered `RESPONSE` distribution gating also now uses
+  `responseDeclarations.length === 1` (raw XML element count) rather than
+  the size of the identifier-keyed `Map`, because two declarations sharing
+  an identifier collapse to a single `Map` entry and would otherwise pass
+  an equality test the XML does not actually satisfy.
+
+### Changed
+
+- The scoring / explanation flow-content renderer now emits a self-displaying
+  `<br />` for `qti-br` in addition to the existing `qti-hr` and `qti-img`
+  cases. The meaningful-content check (`isMeaningfulNode`) is kept in sync
+  with what the report and scoring renderers actually emit, so an
+  explanation body whose only content is `<qti-br/>`, `<qti-hr/>`, or
+  `<qti-img/>` is reported as meaningful (non-`null`, non-empty HTML) in
+  both `renderQtiItemForExplanations.explanationHtml` and
+  `renderQtiItemForScoring.candidateExplanationHtml`.
+
 ## 0.1.3 — 2026-06-13
 
 ### Added

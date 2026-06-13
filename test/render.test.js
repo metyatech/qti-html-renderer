@@ -1287,3 +1287,305 @@ test('string-type extended-text correct response preserves surrounding whitespac
   assert.equal(long.baseType, 'string');
   assert.equal(long.correctResponse[0], '  line one\n    indented\n  last  ');
 });
+
+// ---------------------------------------------------------------------------
+// 0.1.4 — duplicate response-declaration handling and meaningful-content
+// consistency between renderQtiItemForExplanations and renderQtiItemForScoring.
+// ---------------------------------------------------------------------------
+
+test('0.1.4 extractInteractions: two qti-response-declaration elements with the same RESPONSE identifier do not distribute to RESPONSE_1 / RESPONSE_2', () => {
+  // Two distinct qti-response-declaration elements, both with the same
+  // identifier "RESPONSE". The renderer must not silently pick one and
+  // discard the other, and the legacy ordered RESPONSE distribution must
+  // not fire (it requires exactly one response-declaration element in the
+  // XML — a Map.size check would be wrong here, since two declarations
+  // sharing an identifier collapse to a single Map entry).
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-dup-resp" title="Dup RESPONSE">
+  <qti-response-declaration identifier="RESPONSE" cardinality="ordered" base-type="string">
+    <qti-correct-response>
+      <qti-value>first</qti-value>
+      <qti-value>second</qti-value>
+    </qti-correct-response>
+  </qti-response-declaration>
+  <qti-response-declaration identifier="RESPONSE" cardinality="ordered" base-type="string">
+    <qti-correct-response>
+      <qti-value>other</qti-value>
+    </qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-p>
+      A <qti-text-entry-interaction response-identifier="RESPONSE_1"/>
+      B <qti-text-entry-interaction response-identifier="RESPONSE_2"/>
+    </qti-p>
+  </qti-item-body>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+  const a = findInteraction(parsed, 'RESPONSE_1');
+  const b = findInteraction(parsed, 'RESPONSE_2');
+
+  // Neither interaction may bind to a duplicated RESPONSE identifier.
+  assert.equal(a.declarationIdentifier, null);
+  assert.equal(a.declarationValueIndex, null);
+  assert.deepEqual(a.correctResponse, []);
+  assert.equal(b.declarationIdentifier, null);
+  assert.equal(b.declarationValueIndex, null);
+  assert.deepEqual(b.correctResponse, []);
+});
+
+test('0.1.4 extractInteractions: two qti-response-declaration elements with the same CHOICE identifier do not bind the matching choice interaction', () => {
+  // Two declarations with the same identifier, one direct-match interaction.
+  // The interaction must be reported as unmatched: the renderer must not
+  // fall back to a last-wins direct match when the identifier is duplicated.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-dup-choice" title="Dup CHOICE">
+  <qti-response-declaration identifier="CHOICE" cardinality="single" base-type="identifier">
+    <qti-correct-response><qti-value>A</qti-value></qti-correct-response>
+  </qti-response-declaration>
+  <qti-response-declaration identifier="CHOICE" cardinality="single" base-type="identifier">
+    <qti-correct-response><qti-value>B</qti-value></qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-choice-interaction response-identifier="CHOICE" max-choices="1">
+      <qti-simple-choice identifier="A">Alpha</qti-simple-choice>
+      <qti-simple-choice identifier="B">Beta</qti-simple-choice>
+    </qti-choice-interaction>
+  </qti-item-body>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+  const choice = findInteraction(parsed, 'CHOICE');
+
+  assert.equal(choice.declarationIdentifier, null);
+  assert.equal(choice.declarationValueIndex, null);
+  assert.equal(choice.cardinality, null);
+  assert.equal(choice.baseType, null);
+  assert.deepEqual(choice.correctResponse, []);
+});
+
+test('0.1.4 extractInteractions: distinct identifiers on two declarations still bind to two different interactions (regression)', () => {
+  // Positive regression case: two distinct identifiers CHOICE_A and
+  // CHOICE_B on separate response-declaration elements must continue to
+  // bind to their respective interactions exactly as before.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-distinct" title="Distinct">
+  <qti-response-declaration identifier="CHOICE_A" cardinality="single" base-type="identifier">
+    <qti-correct-response><qti-value>A</qti-value></qti-correct-response>
+  </qti-response-declaration>
+  <qti-response-declaration identifier="CHOICE_B" cardinality="single" base-type="identifier">
+    <qti-correct-response><qti-value>Y</qti-value></qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-choice-interaction response-identifier="CHOICE_A" max-choices="1">
+      <qti-simple-choice identifier="A">Alpha</qti-simple-choice>
+      <qti-simple-choice identifier="B">Beta</qti-simple-choice>
+    </qti-choice-interaction>
+    <qti-choice-interaction response-identifier="CHOICE_B" max-choices="1">
+      <qti-simple-choice identifier="X">X</qti-simple-choice>
+      <qti-simple-choice identifier="Y">Y</qti-simple-choice>
+    </qti-choice-interaction>
+  </qti-item-body>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+  const a = findInteraction(parsed, 'CHOICE_A');
+  const b = findInteraction(parsed, 'CHOICE_B');
+
+  assert.equal(a.declarationIdentifier, 'CHOICE_A');
+  assert.deepEqual(a.correctResponse, ['A']);
+  assert.equal(b.declarationIdentifier, 'CHOICE_B');
+  assert.deepEqual(b.correctResponse, ['Y']);
+});
+
+test('0.1.4 extractInteractions: single RESPONSE legacy ordered distribution still works (regression)', () => {
+  // Positive regression case: a single RESPONSE declaration with cardinality
+  // ordered and RESPONSE_1 / RESPONSE_2 text-entry interactions still
+  // distributes its values to the interactions in document order.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-ord-regress" title="Ordered Regression">
+  <qti-response-declaration identifier="RESPONSE" cardinality="ordered" base-type="string">
+    <qti-correct-response>
+      <qti-value>first</qti-value>
+      <qti-value>second</qti-value>
+    </qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-p>
+      A <qti-text-entry-interaction response-identifier="RESPONSE_1"/>
+      B <qti-text-entry-interaction response-identifier="RESPONSE_2"/>
+    </qti-p>
+  </qti-item-body>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+  const a = findInteraction(parsed, 'RESPONSE_1');
+  const b = findInteraction(parsed, 'RESPONSE_2');
+
+  assert.equal(a.declarationIdentifier, 'RESPONSE');
+  assert.equal(a.declarationValueIndex, 0);
+  assert.deepEqual(a.correctResponse, ['first']);
+  assert.equal(b.declarationIdentifier, 'RESPONSE');
+  assert.equal(b.declarationValueIndex, 1);
+  assert.deepEqual(b.correctResponse, ['second']);
+});
+
+test('0.1.4 meaningful content: explanation with only a qti-br is non-empty in both report and scoring paths', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-br" title="BR">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-br/>
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+
+  const reportHtml = renderQtiItemForExplanations(xml, 'item-br').explanationHtml;
+  const scoringHtml = renderQtiItemForScoring(xml).candidateExplanationHtml;
+
+  assert.equal(typeof reportHtml, 'string');
+  assert.ok(reportHtml.length > 0);
+  // The report path renders qti-br via the generic flow-content helper, which
+  // serializes it as <br></br>; the scoring path emits the void-element form
+  // <br /> directly. Both share the <br start tag, so we match that.
+  assert.match(reportHtml, /<br\b/);
+  assert.match(scoringHtml, /<br\s*\/>/);
+});
+
+test('0.1.4 meaningful content: explanation with only a qti-hr is non-empty in both report and scoring paths', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-hr" title="HR">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-hr/>
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+
+  const reportHtml = renderQtiItemForExplanations(xml, 'item-hr').explanationHtml;
+  const scoringHtml = renderQtiItemForScoring(xml).candidateExplanationHtml;
+
+  assert.equal(typeof reportHtml, 'string');
+  assert.ok(reportHtml.length > 0);
+  assert.match(reportHtml, /<hr\s*\/>/);
+
+  assert.equal(typeof scoringHtml, 'string');
+  assert.ok(scoringHtml.length > 0);
+  assert.match(scoringHtml, /<hr\s*\/>/);
+});
+
+test('0.1.4 meaningful content: explanation with only a qti-img is non-empty in both report and scoring paths', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-img2" title="IMG2">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-img src="images/diagram.png" alt="diagram" />
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+
+  const reportHtml = renderQtiItemForExplanations(xml, 'item-img2').explanationHtml;
+  const scoringHtml = renderQtiItemForScoring(xml).candidateExplanationHtml;
+
+  assert.equal(typeof reportHtml, 'string');
+  assert.ok(reportHtml.length > 0);
+  assert.match(reportHtml, /<img/);
+
+  assert.equal(typeof scoringHtml, 'string');
+  assert.ok(scoringHtml.length > 0);
+  assert.match(scoringHtml, /<img/);
+});
+
+test('0.1.4 meaningful content: empty div and empty p containers return null in both report and scoring paths', () => {
+  // Regression / additional empty container shape. qti-div and qti-p with no
+  // children must be considered not meaningful by both renderers, and both
+  // paths must therefore return null for the explanation HTML.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-emptydp" title="Empty DP">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-div></qti-div>
+      <qti-p></qti-p>
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+
+  assert.equal(renderQtiItemForExplanations(xml, 'item-emptydp').explanationHtml, null);
+  assert.equal(renderQtiItemForScoring(xml).candidateExplanationHtml, null);
+});
+
+test('0.1.4 meaningful content: qti-rubric-block only returns null in both report and scoring paths', () => {
+  // Regression: qti-rubric-block is collapsed to '' by every renderer in
+  // this module, so a body that contains only a rubric block is not
+  // meaningful and both paths must return null.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-rb" title="RB">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-rubric-block view="author">scoring notes that never display</qti-rubric-block>
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+
+  assert.equal(renderQtiItemForExplanations(xml, 'item-rb').explanationHtml, null);
+  assert.equal(renderQtiItemForScoring(xml).candidateExplanationHtml, null);
+});
+
+test('0.1.4 meaningful content: for every meaningful case the explanation HTML string is non-empty in both report and scoring paths', () => {
+  // Key invariant. For each XML below, both renderQtiItemForExplanations
+  // (which produces explanationHtml) and renderQtiItemForScoring (which
+  // produces candidateExplanationHtml) must return a non-null, non-empty
+  // string. This guards against drift between the two renderers'
+  // self-displaying-element handling: the meaningful-content check must
+  // stay in sync with what the report and scoring renderers actually emit
+  // (qti-img, qti-hr, qti-br).
+  const cases = [
+    {
+      label: 'qti-br only',
+      expectedIdentifier: 'item-inv-br',
+      xml: `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-inv-br" title="INV BR">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body><qti-br/></qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`,
+    },
+    {
+      label: 'qti-hr only',
+      expectedIdentifier: 'item-inv-hr',
+      xml: `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-inv-hr" title="INV HR">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body><qti-hr/></qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`,
+    },
+    {
+      label: 'qti-img only',
+      expectedIdentifier: 'item-inv-img',
+      xml: `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-inv-img" title="INV IMG">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body><qti-img src="images/a.png" alt="a" /></qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`,
+    },
+  ];
+
+  for (const { label, expectedIdentifier, xml } of cases) {
+    const reportHtml = renderQtiItemForExplanations(xml, expectedIdentifier).explanationHtml;
+    const scoringHtml = renderQtiItemForScoring(xml).candidateExplanationHtml;
+    assert.equal(typeof reportHtml, 'string', `${label}: report path should return a string`);
+    assert.notEqual(reportHtml, '', `${label}: report path HTML must not be the empty string`);
+    assert.equal(typeof scoringHtml, 'string', `${label}: scoring path should return a string`);
+    assert.notEqual(scoringHtml, '', `${label}: scoring path HTML must not be the empty string`);
+  }
+});
