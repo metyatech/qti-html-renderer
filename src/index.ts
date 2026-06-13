@@ -14,10 +14,18 @@ export interface ChoiceOption {
 
 export type InteractionType = 'choice' | 'text-entry' | 'extended-text' | 'other';
 
+export type Cardinality = 'single' | 'multiple' | 'ordered';
+
 export interface InteractionInfo {
   id: string;
   type: InteractionType;
+  declarationIdentifier: string | null;
+  declarationValueIndex: number | null;
+  cardinality: Cardinality | null;
+  baseType: string | null;
   correctResponse: string[];
+  choices: ChoiceOption[];
+  maxChoices: number | null;
 }
 
 export interface ParsedItemForScoring {
@@ -72,7 +80,6 @@ export interface ReportRenderOptions {
 
 export interface ExplanationRenderOptions {
   codeHighlighter?: (code: string, explicitLanguage: string | null) => CodeHighlightResult;
-  domParser?: HtmlDomParser;
 }
 
 export interface HtmlDomParser {
@@ -109,6 +116,14 @@ const defaultReportOptions: Required<Omit<ReportRenderOptions, 'codeHighlighter'
 const NODE_TYPES = {
   ELEMENT_NODE: 1,
   TEXT_NODE: 3,
+};
+
+const hasMeaningfulContent = (body: Element): boolean => {
+  for (const child of Array.from(body.childNodes)) {
+    if (child.nodeType === NODE_TYPES.ELEMENT_NODE) return true;
+    if (child.nodeType === NODE_TYPES.TEXT_NODE && (child.textContent?.trim() ?? '') !== '') return true;
+  }
+  return false;
 };
 
 const resolveHtmlDomParser = (domParser?: HtmlDomParser): HtmlDomParser => {
@@ -191,18 +206,72 @@ const inferInteractionType = (localName: string): InteractionType => {
   return 'other';
 };
 
+const isTextEntryInteraction = (localName: string): boolean => {
+  const lowered = localName.toLowerCase();
+  return (
+    lowered === 'qti-text-entry-interaction' ||
+    lowered === 'text-entry-interaction' ||
+    lowered === 'custom-text-entry-interaction'
+  );
+};
+
+const normalizeCardinality = (raw: string | null): Cardinality | null => {
+  if (raw === 'single' || raw === 'multiple' || raw === 'ordered') return raw;
+  return null;
+};
+
+const normalizeNewlines = (value: string): string => value.replace(/\r\n?/g, '\n');
+
+const readDeclarationValues = (declaration: Element): string[] => {
+  const correctResponse = getElementsByLocalName(declaration, 'qti-correct-response')[0];
+  if (!correctResponse) return [];
+  return getElementsByLocalName(correctResponse, 'qti-value').map((value) =>
+    normalizeNewlines(value.textContent ?? ''),
+  );
+};
+
+const collectInteractionChoices = (interaction: Element): ChoiceOption[] => {
+  return getElementsByLocalName(interaction, 'qti-simple-choice').map((choice) => ({
+    identifier: choice.getAttribute('identifier') ?? '',
+    text: choice.textContent?.trim() ?? '',
+  }));
+};
+
+const parseMaxChoices = (raw: string | null): number | null => {
+  if (raw === null) return null;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isLegacyOrderedResponse = (
+  declaration: { identifier: string; cardinality: Cardinality | null; baseType: string | null },
+  unmatchedInteractionIds: string[],
+): boolean => {
+  if (declaration.identifier !== 'RESPONSE') return false;
+  if (declaration.cardinality !== 'ordered') return false;
+  if (declaration.baseType !== 'string') return false;
+  if (unmatchedInteractionIds.length === 0) return false;
+  for (let index = 0; index < unmatchedInteractionIds.length; index += 1) {
+    if (unmatchedInteractionIds[index] !== `RESPONSE_${index + 1}`) return false;
+  }
+  return true;
+};
+
 const extractInteractions = (root: Element): InteractionInfo[] => {
   const responseDeclarations = getElementsByLocalName(root, 'qti-response-declaration');
-  // Map response identifiers to the list of correct values in document order.
-  const correctMap = new Map<string, string[]>();
+  const declarationByIdentifier = new Map<
+    string,
+    { identifier: string; cardinality: Cardinality | null; baseType: string | null; values: string[] }
+  >();
   for (const decl of responseDeclarations) {
-    const id = decl.getAttribute('identifier');
-    if (!id) continue;
-    const correctResponse = getElementsByLocalName(decl, 'qti-correct-response')[0];
-    const values = correctResponse
-      ? getElementsByLocalName(correctResponse, 'qti-value').map((v) => v.textContent?.trim() ?? '')
-      : [];
-    correctMap.set(id, values);
+    const identifier = decl.getAttribute('identifier');
+    if (!identifier) continue;
+    declarationByIdentifier.set(identifier, {
+      identifier,
+      cardinality: normalizeCardinality(decl.getAttribute('cardinality')),
+      baseType: decl.getAttribute('base-type'),
+      values: readDeclarationValues(decl),
+    });
   }
 
   const itemBody = getElementsByLocalName(root, 'qti-item-body')[0];
@@ -213,90 +282,116 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
   const allTags = Array.from(itemBody.getElementsByTagName('*'));
   const interactionElements = allTags.filter((el) => el.localName.toLowerCase().includes('interaction'));
 
-  // Decide whether a declaration identifier is "shared" by multiple
-  // interactions (same response-identifier on more than one interaction). If
-  // so, distribute the declaration's values in document order across the
-  // matching interactions. If only one interaction references the identifier
-  // (or the declaration has no matching interactions), the interaction gets
-  // the full correct-response list.
-  const interactionsPerId = new Map<string, number>();
-  for (const el of interactionElements) {
+  // Compute the legacy ordered RESPONSE distribution set once, outside the
+  // per-interaction loop. The conditions for this fallback are strict:
+  //   - exactly one qti-response-declaration with identifier "RESPONSE"
+  //   - cardinality="ordered" and base-type="string"
+  //   - every interaction without a direct match is a text-entry interaction
+  //   - the unmatched response-identifiers are RESPONSE_1..RESPONSE_N in
+  //     document order with no gaps or duplicates
+  //   - the number of unmatched interactions equals the number of values
+  const interactionInfo = interactionElements.map((el) => {
     const responseId = el.getAttribute('response-identifier') ?? '';
-    if (!responseId) continue;
-    interactionsPerId.set(responseId, (interactionsPerId.get(responseId) ?? 0) + 1);
+    const type = inferInteractionType(el.localName);
+    return {
+      el,
+      responseId,
+      type,
+      isTextEntry: isTextEntryInteraction(el.localName),
+      isChoice: type === 'choice',
+      maxChoices: type === 'choice' ? parseMaxChoices(el.getAttribute('max-choices')) : null,
+      choices: type === 'choice' ? collectInteractionChoices(el) : [],
+    };
+  });
+
+  const directMatchIds = new Set<string>();
+  for (const info of interactionInfo) {
+    if (info.responseId && declarationByIdentifier.has(info.responseId)) {
+      directMatchIds.add(info.responseId);
+    }
   }
 
-  // Cursors for declared identifiers that are shared.
-  const sharedCursor = new Map<string, number>();
-  // Track which interaction's response-identifier was unmatched by any
-  // declaration so we can fall back to distributing a single "loose"
-  // declaration across those interactions in document order. This matches
-  // the multi-blank cloze pattern where a single declaration's values should
-  // be spread across multiple interaction elements whose response-identifiers
-  // do not match the declaration identifier.
-  const declaredIds = new Set(correctMap.keys());
-  const unmatchedIds = new Set<string>();
-  for (const el of interactionElements) {
-    const responseId = el.getAttribute('response-identifier') ?? '';
-    if (responseId && !declaredIds.has(responseId)) unmatchedIds.add(responseId);
+  const unmatchedInfo = interactionInfo.filter(
+    (info) => info.responseId && !declarationByIdentifier.has(info.responseId),
+  );
+  const unmatchedIds = unmatchedInfo.map((info) => info.responseId);
+
+  let legacyDistribution: Map<string, number> | null = null;
+  const allDeclarationsUnmatched = declarationByIdentifier.size === 1;
+  if (allDeclarationsUnmatched) {
+    const soleDeclaration = [...declarationByIdentifier.values()][0];
+    const allUnmatchedAreTextEntry = unmatchedInfo.every((info) => info.isTextEntry);
+    if (
+      allUnmatchedAreTextEntry &&
+      isLegacyOrderedResponse(soleDeclaration, unmatchedIds) &&
+      soleDeclaration.values.length === unmatchedInfo.length
+    ) {
+      legacyDistribution = new Map<string, number>();
+      unmatchedInfo.forEach((info, index) => {
+        legacyDistribution!.set(info.responseId, index);
+      });
+    }
   }
-  const looseDeclarations = [...correctMap.entries()].filter(([id]) => !interactionsPerId.has(id));
-  const sharedLooseCursor = new Map<string, number>();
-  const sharedLooseValues = new Map<string, string[]>();
-  let looseDeclCursor = 0;
 
-  const interactions: InteractionInfo[] = interactionElements.map((el) => {
-    const localName = el.localName;
-    const type = inferInteractionType(localName);
-    const responseId = el.getAttribute('response-identifier') ?? '';
-    if (!responseId) {
-      return { id: '', type, correctResponse: [] };
-    }
-
-    const directValues = correctMap.get(responseId);
-    if (directValues !== undefined) {
-      const isShared = (interactionsPerId.get(responseId) ?? 0) > 1;
-      if (isShared) {
-        const cursor = sharedCursor.get(responseId) ?? 0;
-        sharedCursor.set(responseId, cursor + 1);
-        const value = directValues[cursor];
-        return {
-          id: responseId,
-          type,
-          correctResponse: value === undefined ? [] : [value],
-        };
-      }
-      return { id: responseId, type, correctResponse: [...directValues] };
-    }
-
-    // Unmatched response-identifier: fall back to a single shared "loose"
-    // declaration so the test/example with `response-identifier="RESPONSE_1"`
-    // and a declaration keyed `identifier="RESPONSE"` still resolves the
-    // correct values. Distribute the loose declaration's values across
-    // unmatched interactions in document order. If multiple loose
-    // declarations exist, the first one in document order wins.
-    if (looseDeclarations.length === 1 && unmatchedIds.has(responseId)) {
-      const [looseId, looseValues] = looseDeclarations[0];
-      if (!sharedLooseValues.has(looseId)) {
-        sharedLooseValues.set(looseId, [...looseValues]);
-      }
-      const remaining = sharedLooseValues.get(looseId) ?? [];
-      const value = remaining[0];
-      sharedLooseValues.set(looseId, remaining.slice(1));
-      sharedLooseCursor.set(looseId, (sharedLooseCursor.get(looseId) ?? 0) + 1);
-      looseDeclCursor += 1;
+  return interactionInfo.map((info) => {
+    if (!info.responseId) {
       return {
-        id: responseId,
-        type,
-        correctResponse: value === undefined ? [] : [value],
+        id: '',
+        type: info.type,
+        declarationIdentifier: null,
+        declarationValueIndex: null,
+        cardinality: null,
+        baseType: null,
+        correctResponse: [],
+        choices: info.choices,
+        maxChoices: info.maxChoices,
       };
     }
 
-    void looseDeclCursor;
-    return { id: responseId, type, correctResponse: [] };
-  });
+    const directDeclaration = declarationByIdentifier.get(info.responseId);
+    if (directDeclaration) {
+      return {
+        id: info.responseId,
+        type: info.type,
+        declarationIdentifier: directDeclaration.identifier,
+        declarationValueIndex: null,
+        cardinality: directDeclaration.cardinality,
+        baseType: directDeclaration.baseType,
+        correctResponse: [...directDeclaration.values],
+        choices: info.choices,
+        maxChoices: info.maxChoices,
+      };
+    }
 
-  return interactions;
+    if (legacyDistribution && legacyDistribution.has(info.responseId)) {
+      const soleDeclaration = [...declarationByIdentifier.values()][0];
+      const valueIndex = legacyDistribution.get(info.responseId)!;
+      const value = soleDeclaration.values[valueIndex];
+      return {
+        id: info.responseId,
+        type: info.type,
+        declarationIdentifier: soleDeclaration.identifier,
+        declarationValueIndex: valueIndex,
+        cardinality: soleDeclaration.cardinality,
+        baseType: soleDeclaration.baseType,
+        correctResponse: value === undefined ? [] : [value],
+        choices: info.choices,
+        maxChoices: info.maxChoices,
+      };
+    }
+
+    return {
+      id: info.responseId,
+      type: info.type,
+      declarationIdentifier: null,
+      declarationValueIndex: null,
+      cardinality: null,
+      baseType: null,
+      correctResponse: [],
+      choices: info.choices,
+      maxChoices: info.maxChoices,
+    };
+  });
 };
 
 const renderNodeForScoring = (
@@ -471,11 +566,9 @@ const parseCandidateExplanation = (root: Element, options: Required<ScoringRende
   if (!explanationFeedback) return null;
   const contentBody = getElementsByLocalName(explanationFeedback, 'qti-content-body')[0];
   if (!contentBody) return null;
+  if (!hasMeaningfulContent(contentBody)) return null;
   const blankCounter = { value: 0 };
-  const explanationNodes = Array.from(contentBody.childNodes).filter(
-    (node) => node.nodeType !== NODE_TYPES.TEXT_NODE || (node.textContent?.trim() ?? '') !== '',
-  );
-  return renderFlowContentChildren(explanationNodes, options, blankCounter);
+  return renderFlowContentChildren(Array.from(contentBody.childNodes), options, blankCounter);
 };
 
 export const renderQtiItemForScoring = (xml: string, options: ScoringRenderOptions = {}): ParsedItemForScoring => {
@@ -781,11 +874,8 @@ const parseExplanationBody = (
   if (!explanationFeedback) return null;
   const contentBody = getElementsByLocalName(explanationFeedback, 'qti-content-body')[0];
   if (!contentBody) return null;
-  const children = Array.from(contentBody.childNodes).filter(
-    (node) => node.nodeType !== NODE_TYPES.TEXT_NODE || (node.textContent?.trim() ?? '') !== '',
-  );
-  const html = renderQtiExplanationBody(children, options, codeHighlighter);
-  return html.length === 0 ? null : html;
+  if (!hasMeaningfulContent(contentBody)) return null;
+  return renderQtiExplanationBody(Array.from(contentBody.childNodes), options, codeHighlighter);
 };
 
 export const renderQtiItemForExplanations = (

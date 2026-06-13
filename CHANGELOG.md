@@ -4,15 +4,20 @@
 
 ### Added
 
-- `renderQtiItemForExplanations(xml, expectedIdentifier, options?)` — public function that returns the explanation body rendered with the report path's flow-content + code-highlighting contract.
-- `ParsedItemForReport.interactions: InteractionInfo[]` and `ParsedItemForReport.explanationHtml: string | null` so the reporter can drive retry / correct / explanation bodies entirely from renderer output.
-- `data-interaction-id="<response-identifier>"` attribute on the report path's `choice-interaction` wrappers and cloze inputs so consumers can attach correct values by id without XML parsing.
-- `InteractionInfo.type` is now the typed union `'choice' | 'text-entry' | 'extended-text' | 'other'`.
+- `InteractionInfo` now exposes `declarationIdentifier`, `declarationValueIndex`, `cardinality`, `baseType`, `choices`, and `maxChoices` so consumers can build retry / correct / explanation UIs without re-parsing the source XML.
+- Each `choice` interaction's `choices` is the interaction's own list of `qti-simple-choice` children, not the item-level flatten.
+- `prepack` script that runs `npm run build` automatically.
 
 ### Changed
 
-- `extractInteractions` (private) now matches each interaction's `response-identifier` to the corresponding `qti-response-declaration` and copies the declaration's `qti-value` list into the interaction's `correctResponse`. For shared declarations across multiple interactions, values are distributed in document order.
-- `InteractionInfo.type` (now exposed on both `ParsedItemForScoring` and `ParsedItemForReport`) is `'choice' | 'text-entry' | 'extended-text' | 'other'` (was the never-documented `'choiceInteraction' | 'textEntryInteraction'` strings).
+- `extractInteractions` no longer falls back to a "first loose declaration wins" heuristic. Behavior:
+  - Direct identifier match: the interaction gets the matching declaration's values.
+  - Legacy ordered `RESPONSE` distribution is supported only when ALL of the following hold: declaration identifier is exactly `RESPONSE`, `cardinality="ordered"`, `base-type="string"`, all `RESPONSE_1..RESPONSE_N` text-entry interactions are present in document order with no gaps, value count matches interaction count, and no other declaration is present. Outside of that exact shape, unmatched interactions get `correctResponse: []`.
+- `correctResponse` values preserve newlines, indentation, and surrounding whitespace (no `.trim()`); only `\r\n`/`\r` is normalized to `\n`.
+
+### Fixed
+
+- Empty / whitespace-only / comment-only `qti-content-body` now returns `explanationHtml: null` instead of an empty wrapper.
 
 ### Security
 
@@ -24,7 +29,7 @@
 
 ### Removed
 
-- The unused private `_enhanceReportCodeHtml` helper (the explanation path now renders through the same flow as the report body).
+- `ExplanationRenderOptions.domParser` (was a non-functional future option).
 
 ## 0.1.1 — 2026-02-23
 
