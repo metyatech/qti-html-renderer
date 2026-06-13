@@ -119,9 +119,11 @@ const NODE_TYPES = {
 };
 
 // Local names that render to something visible on their own, even with no
-// children (void / self-displaying elements). Both qti- prefixed and bare
-// HTML spellings are accepted.
-const SELF_DISPLAYING_LOCAL_NAMES = new Set(['img', 'qti-img', 'hr', 'qti-hr', 'br', 'qti-br']);
+// children (void / self-displaying elements). Only the qti- prefixed QTI
+// spellings are accepted; bare HTML spellings (img, hr, br) are not in
+// the QTI 3.0 item body vocabulary and are not treated as meaningful on
+// their own.
+const SELF_DISPLAYING_LOCAL_NAMES = new Set(['qti-img', 'qti-hr', 'qti-br']);
 
 // Local names that every renderer in this module converts to an empty string,
 // regardless of their descendants. They never contribute meaningful content.
@@ -131,7 +133,7 @@ const RENDERS_EMPTY_LOCAL_NAMES = new Set(['qti-rubric-block']);
 // Rules:
 //   - a non-whitespace text node is meaningful
 //   - comment / processing-instruction nodes are ignored
-//   - self-displaying elements (img, hr, ...) are meaningful by themselves
+//   - self-displaying elements (qti-img, qti-hr, qti-br) are meaningful by themselves
 //   - elements every renderer collapses to '' are never meaningful
 //   - container elements (p, div, list, table, ...) are meaningful only when a
 //     descendant is meaningful
@@ -296,6 +298,11 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
   >();
   const declarationElementCountByIdentifier = new Map<string, number>();
   for (const decl of responseDeclarations) {
+    // Declarations whose identifier attribute is missing or empty are
+    // unusable for binding — they cannot be matched to an interaction
+    // response-identifier. Skip them silently so the function never
+    // throws on otherwise parseable QTI input; the corresponding
+    // interaction (if any) is reported as unmatched in the result.
     const identifier = decl.getAttribute('identifier');
     if (!identifier) continue;
     const baseType = decl.getAttribute('base-type');
@@ -369,13 +376,21 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
   // interaction matches directly — the fallback does not fire and the
   // affected interactions stay unmatched.
   const hasSingleResponseDeclaration = responseDeclarations.length === 1;
+  const hasSingleDeclarationInMap = declarationByIdentifier.size === 1;
   const noDirectMatches = trustworthyDirectMatchIds.size === 0;
   const everyInteractionIsUnmatched = unmatchedInfo.length === interactionInfo.length;
   const everyInteractionIsTextEntry =
     interactionInfo.length > 0 && interactionInfo.every((info) => info.type === 'text-entry');
-  if (hasSingleResponseDeclaration && noDirectMatches && everyInteractionIsUnmatched && everyInteractionIsTextEntry) {
+  if (
+    hasSingleResponseDeclaration &&
+    hasSingleDeclarationInMap &&
+    noDirectMatches &&
+    everyInteractionIsUnmatched &&
+    everyInteractionIsTextEntry
+  ) {
     const soleDeclaration = [...declarationByIdentifier.values()][0];
     if (
+      soleDeclaration !== undefined &&
       isLegacyOrderedResponse(soleDeclaration, unmatchedIds) &&
       soleDeclaration.values.length === interactionInfo.length
     ) {
@@ -867,6 +882,8 @@ const renderNodeForReport = (
     case 'qti-hr':
     case 'hr':
       return '<hr />';
+    case 'qti-br':
+      return '<br />';
     default: {
       const tagName = name.startsWith('qti-') ? name.slice(4) : name;
       const attrs = serializeAttributes(el);

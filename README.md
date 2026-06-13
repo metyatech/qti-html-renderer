@@ -149,13 +149,16 @@ explanation.explanationHtml; // null when the item has no qti-modal-feedback
 `qti-content-body`, or the body is empty / contains only whitespace text
 nodes / contains only XML comments. The meaningful-content check is kept in
 sync with what the report and scoring renderers actually emit, so an
-explanation body whose only content is a self-displaying element such as
-`qti-img`, `qti-hr`, or `qti-br` is reported as meaningful (non-`null`,
-non-empty HTML) in both `renderQtiItemForExplanations.explanationHtml` and
-`renderQtiItemForScoring.candidateExplanationHtml`. Conversely, a body that
-contains only `qti-rubric-block` (which every renderer collapses to `''`)
-or only empty container elements (`qti-p`, `qti-div`, lists, tables) is
-still reported as `null` in both paths.
+explanation body whose only content is one of the QTI-prefixed
+self-displaying elements `qti-img`, `qti-hr`, or `qti-br` is reported as
+meaningful (non-`null`, non-empty HTML) in both
+`renderQtiItemForExplanations.explanationHtml` and
+`renderQtiItemForScoring.candidateExplanationHtml`. Bare HTML `img`, `hr`,
+and `br` spellings are not in the QTI 3.0 item body vocabulary and are not
+treated as meaningful on their own. Conversely, a body that contains only
+`qti-rubric-block` (which every renderer collapses to `''`) or only empty
+container elements (`qti-p`, `qti-div`, lists, tables) is still reported as
+`null` in both paths.
 
 ### HTML utilities
 

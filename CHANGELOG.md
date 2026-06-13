@@ -1,35 +1,5 @@
 # Changelog
 
-## 0.1.4 — 2026-06-13
-
-### Fixed
-
-- Duplicate `<qti-response-declaration>` handling. When two or more
-  `qti-response-declaration` elements share the same `identifier`, the
-  structure is ambiguous and the renderer no longer silently picks one and
-  discards the others. The duplicate count is tracked per identifier; the
-  affected identifier is removed from the trusted direct-match set, and the
-  binding loop now refuses to honor a direct match on a duplicated
-  identifier. The interaction is reported as unmatched
-  (`declarationIdentifier: null`, `declarationValueIndex: null`,
-  `cardinality: null`, `baseType: null`, `correctResponse: []`). The legacy
-  ordered `RESPONSE` distribution gating also now uses
-  `responseDeclarations.length === 1` (raw XML element count) rather than
-  the size of the identifier-keyed `Map`, because two declarations sharing
-  an identifier collapse to a single `Map` entry and would otherwise pass
-  an equality test the XML does not actually satisfy.
-
-### Changed
-
-- The scoring / explanation flow-content renderer now emits a self-displaying
-  `<br />` for `qti-br` in addition to the existing `qti-hr` and `qti-img`
-  cases. The meaningful-content check (`isMeaningfulNode`) is kept in sync
-  with what the report and scoring renderers actually emit, so an
-  explanation body whose only content is `<qti-br/>`, `<qti-hr/>`, or
-  `<qti-img/>` is reported as meaningful (non-`null`, non-empty HTML) in
-  both `renderQtiItemForExplanations.explanationHtml` and
-  `renderQtiItemForScoring.candidateExplanationHtml`.
-
 ## 0.1.3 — 2026-06-13
 
 ### Added
@@ -43,11 +13,16 @@
 - `extractInteractions` no longer falls back to a "first loose declaration wins" heuristic. Behavior:
   - Direct identifier match: the interaction gets the matching declaration's values.
   - Legacy ordered `RESPONSE` distribution is supported only when ALL of the following hold: exactly one `qti-response-declaration` exists, its identifier is exactly `RESPONSE`, `cardinality="ordered"`, `base-type="string"`; no interaction matches a declaration directly (`directMatchIds` is empty); every interaction in the item is unmatched (`unmatchedInfo.length === interactionInfo.length`); every interaction's published type is exactly `text-entry` (custom / non-standard interactions reported as `other` are excluded); the unmatched `response-identifier`s are exactly `RESPONSE_1..RESPONSE_N` in document order with no gaps or duplicates; and the value count equals the interaction count. Outside that exact shape, unmatched interactions get `correctResponse: []`. In particular, a literal `RESPONSE` interaction wins by direct match and suppresses the fallback for any sibling `RESPONSE_1` interaction.
+  - The legacy ordered `RESPONSE` distribution gate now requires `declarationByIdentifier.size === 1` in addition to the raw `responseDeclarations.length === 1` check, and the `soleDeclaration` lookup is undefined-checked before being passed to `isLegacyOrderedResponse()`. This guards against a `Map.size` check that would otherwise pass when multiple `qti-response-declaration` elements share an identifier (they collapse to a single `Map` entry) and against the type-narrowing assumption that `[...declarationByIdentifier.values()][0]` is non-`undefined`.
+  - Declarations whose `identifier` attribute is missing or empty are skipped silently: they are not added to `declarationByIdentifier`, the function does not throw, and any matching interaction is reported as unmatched (`declarationIdentifier: null`, `declarationValueIndex: null`, `cardinality: null`, `baseType: null`, `correctResponse: []`).
 - `correctResponse` values are normalized per declaration `base-type`. All newline styles are normalized to `\n`. `base-type="string"` preserves surrounding whitespace, indentation, and blank lines; every other base-type (`identifier`, `boolean`, `integer`, `float`, ..., and the unspecified case) is trimmed of surrounding whitespace.
+- The report path (`renderQtiItemForReport`) now emits a self-displaying `<br />` for `qti-br` in addition to the existing `qti-hr` and `qti-img` cases, matching the scoring / explanation flow-content renderer. The `default` branch in `renderNodeForReport` would otherwise serialize `qti-br` as `<br></br>`.
+- The meaningful-content check (`isMeaningfulNode`) is kept in sync with what the report and scoring renderers actually emit: the `SELF_DISPLAYING_LOCAL_NAMES` set now contains only the QTI-prefixed self-displaying elements `qti-img`, `qti-hr`, and `qti-br`. Bare `img`, `hr`, `br` spellings are not in the QTI 3.0 item body vocabulary and are not treated as meaningful on their own. An explanation body whose only content is `<qti-br/>`, `<qti-hr/>`, or `<qti-img/>` is reported as meaningful (non-`null`, non-empty HTML) in both `renderQtiItemForExplanations.explanationHtml` and `renderQtiItemForScoring.candidateExplanationHtml`.
 
 ### Fixed
 
-- Empty / whitespace-only / comment-only `qti-content-body` now returns `explanationHtml: null` (and `candidateExplanationHtml: null`) instead of an empty wrapper. Meaningfulness is now determined recursively: a non-whitespace text node or a self-displaying element (`img`, `hr`, ...) anywhere in the body counts as content, while containers (`p`, `div`, lists, tables) that recurse to nothing — and elements every renderer collapses to `''` (`qti-rubric-block`) — do not.
+- Empty / whitespace-only / comment-only `qti-content-body` now returns `explanationHtml: null` (and `candidateExplanationHtml: null`) instead of an empty wrapper. Meaningfulness is now determined recursively: a non-whitespace text node or a self-displaying element (`qti-img`, `qti-hr`, `qti-br`) anywhere in the body counts as content, while containers (`p`, `div`, lists, tables) that recurse to nothing — and elements every renderer collapses to `''` (`qti-rubric-block`) — do not.
+- Duplicate `<qti-response-declaration>` handling. When two or more `qti-response-declaration` elements share the same `identifier`, the structure is ambiguous and the renderer no longer silently picks one and discards the others. The duplicate count is tracked per identifier; the affected identifier is removed from the trusted direct-match set, and the binding loop now refuses to honor a direct match on a duplicated identifier. The interaction is reported as unmatched (`declarationIdentifier: null`, `declarationValueIndex: null`, `cardinality: null`, `baseType: null`, `correctResponse: []`). The legacy ordered `RESPONSE` distribution gating also now uses `responseDeclarations.length === 1` (raw XML element count) rather than the size of the identifier-keyed `Map`, because two declarations sharing an identifier collapse to a single `Map` entry and would otherwise pass an equality test the XML does not actually satisfy.
 
 ### Security
 
