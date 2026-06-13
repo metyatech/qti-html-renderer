@@ -89,16 +89,21 @@ Two binding rules apply:
 - **Direct match** — when the interaction's `response-identifier` equals a
   `qti-response-declaration` identifier, the interaction gets the matching
   declaration's values in full.
-- **Legacy ordered `RESPONSE` distribution** — when there is exactly one
-  `qti-response-declaration` with `identifier="RESPONSE"`,
-  `cardinality="ordered"`, `base-type="string"`, and the unmatched
-  interactions are all `qti-text-entry-interaction` elements whose
+- **Legacy ordered `RESPONSE` distribution** — applies only to the pure cloze
+  shape it was designed for. ALL of the following must hold: there is exactly
+  one `qti-response-declaration`; its `identifier` is exactly `RESPONSE` with
+  `cardinality="ordered"` and `base-type="string"`; no interaction matches a
+  declaration directly; every interaction in the item is unmatched; every
+  interaction's published `type` is exactly `text-entry` (custom or
+  non-standard interactions reported as `other` are excluded); the unmatched
   `response-identifier`s are exactly `RESPONSE_1`..`RESPONSE_N` in document
-  order with no gaps and no duplicates, and the value count equals the
-  interaction count, the declaration's values are distributed to the
-  interactions in document order. In that case
-  `declarationValueIndex` records the 0-based position assigned to the
-  interaction.
+  order with no gaps and no duplicates; and the value count equals the
+  interaction count. Then the declaration's values are distributed to the
+  interactions in document order and `declarationValueIndex` records the
+  0-based position assigned to each one. If any interaction matches a
+  declaration directly — for example a literal `RESPONSE` interaction next to
+  a `RESPONSE_1` interaction — the fallback does not fire: the `RESPONSE`
+  interaction wins by direct match and `RESPONSE_1` stays unmatched.
 
 If neither rule applies, the interaction's `declarationIdentifier`,
 `declarationValueIndex`, `cardinality`, and `baseType` are `null` and
@@ -175,15 +180,20 @@ interface InteractionInfo {
   declarationValueIndex: number | null; // 0-based index into the declaration's values (legacy ordered RESPONSE distribution only; null otherwise)
   cardinality: 'single' | 'multiple' | 'ordered' | null; // from the declaration, normalized; null if absent
   baseType: string | null; // from the declaration; null if absent
-  correctResponse: string[]; // values in document order, whitespace preserved (only \r\n/\r normalized to \n)
+  correctResponse: string[]; // values in document order; newlines normalized to \n, then base-type="string" preserves surrounding whitespace while other base-types are trimmed
   choices: ChoiceOption[]; // for choice interactions, this interaction's own qti-simple-choice children
   maxChoices: number | null; // parsed from max-choices, only meaningful for choice interactions
 }
 ```
 
-`correctResponse` values preserve newlines, indentation, and surrounding
-whitespace (no `.trim()` is applied); only `\r\n` and `\r` are normalized to
-`\n`. Consumers that want trimmed values must trim at the assertion site.
+`correctResponse` values are normalized per declaration `base-type`. Every
+newline style is first normalized to `\n`. When `base-type="string"`, the
+value preserves surrounding whitespace, indentation, and blank lines (no
+`.trim()`). For every other base-type (`identifier`, `boolean`, `integer`,
+`float`, ..., and the unspecified case) the value is trimmed of surrounding
+whitespace, because that whitespace is never part of the value for those
+types. `extended-text` string answers therefore keep their whitespace, while
+`identifier` choice answers like `CHOICE_B` are returned trimmed.
 
 ## Development
 

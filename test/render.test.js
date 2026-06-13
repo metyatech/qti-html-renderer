@@ -1124,3 +1124,166 @@ test('0.1.3 extractInteractions: unknown interaction type falls back to "other"'
   assert.deepEqual(interaction.choices, []);
   assert.equal(interaction.maxChoices, null);
 });
+
+// ---------------------------------------------------------------------------
+// Stricter legacy-ordered gating, base-type normalization, and recursive
+// explanation meaningfulness.
+// ---------------------------------------------------------------------------
+
+test('legacy ordered RESPONSE does not distribute when a literal RESPONSE interaction matches directly', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-mix-direct" title="Mix Direct">
+  <qti-response-declaration identifier="RESPONSE" cardinality="ordered" base-type="string">
+    <qti-correct-response>
+      <qti-value>answer</qti-value>
+    </qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-p>
+      <qti-text-entry-interaction response-identifier="RESPONSE"/>
+      <qti-text-entry-interaction response-identifier="RESPONSE_1"/>
+    </qti-p>
+  </qti-item-body>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+  const direct = findInteraction(parsed, 'RESPONSE');
+  const other = findInteraction(parsed, 'RESPONSE_1');
+
+  // RESPONSE matches its declaration directly and gets the value.
+  assert.equal(direct.declarationIdentifier, 'RESPONSE');
+  assert.equal(direct.declarationValueIndex, null);
+  assert.deepEqual(direct.correctResponse, ['answer']);
+
+  // RESPONSE_1 stays unmatched: the legacy fallback must not fire because there
+  // is a direct match present.
+  assert.equal(other.declarationIdentifier, null);
+  assert.equal(other.declarationValueIndex, null);
+  assert.deepEqual(other.correctResponse, []);
+});
+
+test('legacy ordered RESPONSE does not distribute to non-standard custom-text-entry interactions', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-custom" title="Custom">
+  <qti-response-declaration identifier="RESPONSE" cardinality="ordered" base-type="string">
+    <qti-correct-response>
+      <qti-value>first</qti-value>
+      <qti-value>second</qti-value>
+    </qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-p>
+      A <custom-text-entry-interaction response-identifier="RESPONSE_1"/>
+      B <custom-text-entry-interaction response-identifier="RESPONSE_2"/>
+    </qti-p>
+  </qti-item-body>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+  const a = findInteraction(parsed, 'RESPONSE_1');
+  const b = findInteraction(parsed, 'RESPONSE_2');
+
+  // custom-text-entry-interaction is reported as 'other', never text-entry.
+  assert.equal(a.type, 'other');
+  assert.equal(b.type, 'other');
+  // No legacy distribution to non-standard interactions.
+  assert.equal(a.declarationIdentifier, null);
+  assert.deepEqual(a.correctResponse, []);
+  assert.equal(b.declarationIdentifier, null);
+  assert.deepEqual(b.correctResponse, []);
+});
+
+test('explanation with only a whitespace-only paragraph returns null', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-wsp" title="WSP">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-p>   </qti-p>
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+  assert.equal(renderQtiItemForExplanations(xml, 'item-wsp').explanationHtml, null);
+  assert.equal(renderQtiItemForScoring(xml).candidateExplanationHtml, null);
+});
+
+test('explanation with only a comment-bearing paragraph returns null', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-cmt" title="CMT">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-p><!-- comment only --></qti-p>
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+  assert.equal(renderQtiItemForExplanations(xml, 'item-cmt').explanationHtml, null);
+  assert.equal(renderQtiItemForScoring(xml).candidateExplanationHtml, null);
+});
+
+test('explanation with only empty div/list/table containers returns null', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-empty" title="Empty">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-div></qti-div>
+      <qti-ul></qti-ul>
+      <qti-table></qti-table>
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+  assert.equal(renderQtiItemForExplanations(xml, 'item-empty').explanationHtml, null);
+  assert.equal(renderQtiItemForScoring(xml).candidateExplanationHtml, null);
+});
+
+test('explanation with only an image is not null', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-img" title="IMG">
+  <qti-item-body><qti-p>body</qti-p></qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-img src="images/diagram.png" alt="diagram" />
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+  const html = renderQtiItemForExplanations(xml, 'item-img').explanationHtml;
+  assert.equal(typeof html, 'string');
+  assert.match(html, /<img[^>]*src="images\/diagram\.png"[^>]*alt="diagram"[^>]*\/>/);
+});
+
+test('identifier-type correct response is trimmed of surrounding whitespace', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-idtrim" title="ID Trim">
+  <qti-response-declaration identifier="CHOICE" cardinality="single" base-type="identifier">
+    <qti-correct-response><qti-value>
+  CHOICE_B
+</qti-value></qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-choice-interaction response-identifier="CHOICE" max-choices="1">
+      <qti-simple-choice identifier="CHOICE_A">Alpha</qti-simple-choice>
+      <qti-simple-choice identifier="CHOICE_B">Beta</qti-simple-choice>
+    </qti-choice-interaction>
+  </qti-item-body>
+</qti-assessment-item>`;
+  const parsed = renderQtiItemForScoring(xml);
+  const choice = findInteraction(parsed, 'CHOICE');
+  assert.deepEqual(choice.correctResponse, ['CHOICE_B']);
+});
+
+test('string-type extended-text correct response preserves surrounding whitespace and newlines', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-strkeep" title="Str Keep">
+  <qti-response-declaration identifier="LONG" cardinality="single" base-type="string">
+    <qti-correct-response><qti-value>  line one\n    indented\n  last  </qti-value></qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-extended-text-interaction response-identifier="LONG"/>
+  </qti-item-body>
+</qti-assessment-item>`;
+  const parsed = renderQtiItemForScoring(xml);
+  const long = findInteraction(parsed, 'LONG');
+  assert.equal(long.baseType, 'string');
+  assert.equal(long.correctResponse[0], '  line one\n    indented\n  last  ');
+});

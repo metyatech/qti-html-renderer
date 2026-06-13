@@ -118,13 +118,36 @@ const NODE_TYPES = {
   TEXT_NODE: 3,
 };
 
-const hasMeaningfulContent = (body: Element): boolean => {
-  for (const child of Array.from(body.childNodes)) {
-    if (child.nodeType === NODE_TYPES.ELEMENT_NODE) return true;
-    if (child.nodeType === NODE_TYPES.TEXT_NODE && (child.textContent?.trim() ?? '') !== '') return true;
+// Local names that render to something visible on their own, even with no
+// children (void / self-displaying elements). Both qti- prefixed and bare
+// HTML spellings are accepted.
+const SELF_DISPLAYING_LOCAL_NAMES = new Set(['img', 'qti-img', 'hr', 'qti-hr', 'br', 'qti-br']);
+
+// Local names that every renderer in this module converts to an empty string,
+// regardless of their descendants. They never contribute meaningful content.
+const RENDERS_EMPTY_LOCAL_NAMES = new Set(['qti-rubric-block']);
+
+// Recursively decide whether a node would render any displayable content.
+// Rules:
+//   - a non-whitespace text node is meaningful
+//   - comment / processing-instruction nodes are ignored
+//   - self-displaying elements (img, hr, ...) are meaningful by themselves
+//   - elements every renderer collapses to '' are never meaningful
+//   - container elements (p, div, list, table, ...) are meaningful only when a
+//     descendant is meaningful
+const isMeaningfulNode = (node: Node): boolean => {
+  if (node.nodeType === NODE_TYPES.TEXT_NODE) {
+    return (node.textContent?.trim() ?? '') !== '';
   }
-  return false;
+  if (node.nodeType !== NODE_TYPES.ELEMENT_NODE) return false;
+  const el = node as Element;
+  const localName = el.localName.toLowerCase();
+  if (RENDERS_EMPTY_LOCAL_NAMES.has(localName)) return false;
+  if (SELF_DISPLAYING_LOCAL_NAMES.has(localName)) return true;
+  return Array.from(el.childNodes).some(isMeaningfulNode);
 };
+
+const hasMeaningfulContent = (body: Element): boolean => Array.from(body.childNodes).some(isMeaningfulNode);
 
 const resolveHtmlDomParser = (domParser?: HtmlDomParser): HtmlDomParser => {
   if (domParser) return domParser;
@@ -206,15 +229,6 @@ const inferInteractionType = (localName: string): InteractionType => {
   return 'other';
 };
 
-const isTextEntryInteraction = (localName: string): boolean => {
-  const lowered = localName.toLowerCase();
-  return (
-    lowered === 'qti-text-entry-interaction' ||
-    lowered === 'text-entry-interaction' ||
-    lowered === 'custom-text-entry-interaction'
-  );
-};
-
 const normalizeCardinality = (raw: string | null): Cardinality | null => {
   if (raw === 'single' || raw === 'multiple' || raw === 'ordered') return raw;
   return null;
@@ -222,11 +236,23 @@ const normalizeCardinality = (raw: string | null): Cardinality | null => {
 
 const normalizeNewlines = (value: string): string => value.replace(/\r\n?/g, '\n');
 
-const readDeclarationValues = (declaration: Element): string[] => {
+// Normalize a single qti-value's text according to its declaration base-type.
+// All newline styles are normalized to "\n" first. Only `base-type="string"`
+// preserves surrounding whitespace / indentation / blank lines; every other
+// base-type (identifier, boolean, integer, float, ... and the unspecified
+// case) trims surrounding whitespace because that whitespace is never part of
+// the value for those types.
+const normalizeCorrectValue = (raw: string, baseType: string | null): string => {
+  const newlineNormalized = normalizeNewlines(raw);
+  if (baseType === 'string') return newlineNormalized;
+  return newlineNormalized.trim();
+};
+
+const readDeclarationValues = (declaration: Element, baseType: string | null): string[] => {
   const correctResponse = getElementsByLocalName(declaration, 'qti-correct-response')[0];
   if (!correctResponse) return [];
   return getElementsByLocalName(correctResponse, 'qti-value').map((value) =>
-    normalizeNewlines(value.textContent ?? ''),
+    normalizeCorrectValue(value.textContent ?? '', baseType),
   );
 };
 
@@ -266,11 +292,12 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
   for (const decl of responseDeclarations) {
     const identifier = decl.getAttribute('identifier');
     if (!identifier) continue;
+    const baseType = decl.getAttribute('base-type');
     declarationByIdentifier.set(identifier, {
       identifier,
       cardinality: normalizeCardinality(decl.getAttribute('cardinality')),
-      baseType: decl.getAttribute('base-type'),
-      values: readDeclarationValues(decl),
+      baseType,
+      values: readDeclarationValues(decl, baseType),
     });
   }
 
@@ -282,14 +309,6 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
   const allTags = Array.from(itemBody.getElementsByTagName('*'));
   const interactionElements = allTags.filter((el) => el.localName.toLowerCase().includes('interaction'));
 
-  // Compute the legacy ordered RESPONSE distribution set once, outside the
-  // per-interaction loop. The conditions for this fallback are strict:
-  //   - exactly one qti-response-declaration with identifier "RESPONSE"
-  //   - cardinality="ordered" and base-type="string"
-  //   - every interaction without a direct match is a text-entry interaction
-  //   - the unmatched response-identifiers are RESPONSE_1..RESPONSE_N in
-  //     document order with no gaps or duplicates
-  //   - the number of unmatched interactions equals the number of values
   const interactionInfo = interactionElements.map((el) => {
     const responseId = el.getAttribute('response-identifier') ?? '';
     const type = inferInteractionType(el.localName);
@@ -297,7 +316,6 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
       el,
       responseId,
       type,
-      isTextEntry: isTextEntryInteraction(el.localName),
       isChoice: type === 'choice',
       maxChoices: type === 'choice' ? parseMaxChoices(el.getAttribute('max-choices')) : null,
       choices: type === 'choice' ? collectInteractionChoices(el) : [],
@@ -317,14 +335,23 @@ const extractInteractions = (root: Element): InteractionInfo[] => {
   const unmatchedIds = unmatchedInfo.map((info) => info.responseId);
 
   let legacyDistribution: Map<string, number> | null = null;
-  const allDeclarationsUnmatched = declarationByIdentifier.size === 1;
-  if (allDeclarationsUnmatched) {
+  // The legacy ordered RESPONSE distribution only applies when the item is the
+  // pure cloze shape it was designed for: a single RESPONSE declaration with no
+  // direct interaction match at all, and every interaction in the item is an
+  // unmatched text-entry whose response-identifier is RESPONSE_1..RESPONSE_N.
+  // If any interaction matches a declaration directly (e.g. a literal RESPONSE
+  // interaction alongside a RESPONSE_1 one), the fallback must not fire; the
+  // directly matched interactions win and the rest stay unmatched.
+  const hasSingleResponseDeclaration = declarationByIdentifier.size === 1;
+  const noDirectMatches = directMatchIds.size === 0;
+  const everyInteractionIsUnmatched = unmatchedInfo.length === interactionInfo.length;
+  const everyInteractionIsTextEntry =
+    interactionInfo.length > 0 && interactionInfo.every((info) => info.type === 'text-entry');
+  if (hasSingleResponseDeclaration && noDirectMatches && everyInteractionIsUnmatched && everyInteractionIsTextEntry) {
     const soleDeclaration = [...declarationByIdentifier.values()][0];
-    const allUnmatchedAreTextEntry = unmatchedInfo.every((info) => info.isTextEntry);
     if (
-      allUnmatchedAreTextEntry &&
       isLegacyOrderedResponse(soleDeclaration, unmatchedIds) &&
-      soleDeclaration.values.length === unmatchedInfo.length
+      soleDeclaration.values.length === interactionInfo.length
     ) {
       legacyDistribution = new Map<string, number>();
       unmatchedInfo.forEach((info, index) => {

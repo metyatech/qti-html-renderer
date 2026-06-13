@@ -12,12 +12,12 @@
 
 - `extractInteractions` no longer falls back to a "first loose declaration wins" heuristic. Behavior:
   - Direct identifier match: the interaction gets the matching declaration's values.
-  - Legacy ordered `RESPONSE` distribution is supported only when ALL of the following hold: declaration identifier is exactly `RESPONSE`, `cardinality="ordered"`, `base-type="string"`, all `RESPONSE_1..RESPONSE_N` text-entry interactions are present in document order with no gaps, value count matches interaction count, and no other declaration is present. Outside of that exact shape, unmatched interactions get `correctResponse: []`.
-- `correctResponse` values preserve newlines, indentation, and surrounding whitespace (no `.trim()`); only `\r\n`/`\r` is normalized to `\n`.
+  - Legacy ordered `RESPONSE` distribution is supported only when ALL of the following hold: exactly one `qti-response-declaration` exists, its identifier is exactly `RESPONSE`, `cardinality="ordered"`, `base-type="string"`; no interaction matches a declaration directly (`directMatchIds` is empty); every interaction in the item is unmatched (`unmatchedInfo.length === interactionInfo.length`); every interaction's published type is exactly `text-entry` (custom / non-standard interactions reported as `other` are excluded); the unmatched `response-identifier`s are exactly `RESPONSE_1..RESPONSE_N` in document order with no gaps or duplicates; and the value count equals the interaction count. Outside that exact shape, unmatched interactions get `correctResponse: []`. In particular, a literal `RESPONSE` interaction wins by direct match and suppresses the fallback for any sibling `RESPONSE_1` interaction.
+- `correctResponse` values are normalized per declaration `base-type`. All newline styles are normalized to `\n`. `base-type="string"` preserves surrounding whitespace, indentation, and blank lines; every other base-type (`identifier`, `boolean`, `integer`, `float`, ..., and the unspecified case) is trimmed of surrounding whitespace.
 
 ### Fixed
 
-- Empty / whitespace-only / comment-only `qti-content-body` now returns `explanationHtml: null` instead of an empty wrapper.
+- Empty / whitespace-only / comment-only `qti-content-body` now returns `explanationHtml: null` (and `candidateExplanationHtml: null`) instead of an empty wrapper. Meaningfulness is now determined recursively: a non-whitespace text node or a self-displaying element (`img`, `hr`, ...) anywhere in the body counts as content, while containers (`p`, `div`, lists, tables) that recurse to nothing — and elements every renderer collapses to `''` (`qti-rubric-block`) — do not.
 
 ### Security
 
