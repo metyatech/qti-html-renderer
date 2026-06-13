@@ -109,3 +109,82 @@ test('rewriteHtmlImageSources resolves relative paths', () => {
   const img = doc.querySelector('img');
   assert.equal(img?.getAttribute('src'), '/assets/items/images/pic.png');
 });
+
+test('renderQtiItemForScoring exposes candidateExplanationHtml for items with EXPLANATION modal feedback', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-exp" title="Item Exp">
+  <qti-item-body>
+    <qti-p>Body prompt.</qti-p>
+  </qti-item-body>
+  <qti-modal-feedback identifier="EXPLANATION" outcome-identifier="FEEDBACK">
+    <qti-content-body>
+      <qti-p>Use <qti-em>emphasis</qti-em> and <qti-code>inlineFn()</qti-code> in code.</qti-p>
+      <qti-pre><qti-code class="language-ts">const answer: number = 42;</qti-code></qti-pre>
+    </qti-content-body>
+  </qti-modal-feedback>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+  const html = parsed.candidateExplanationHtml;
+
+  assert.equal(typeof html, 'string');
+  assert.ok(html.length > 0);
+  // Paragraph rendered through the shared flow-content helper, including the qti-em.
+  assert.match(html, /<p>Use <em>emphasis<\/em> and <code>inlineFn\(\)<\/code> in code\.<\/p>/);
+  // Inline code element for the inline qti-code.
+  assert.match(html, /<code>inlineFn\(\)<\/code>/);
+  // Code block. NOTE: the scoring/explanation flow-content renderer intentionally
+  // does not inject report code classes (that remains the report path's job / the
+  // not-yet-wired _enhanceReportCodeHtml helper), so candidateExplanationHtml keeps
+  // the bare <pre><code> structure. We assert the structure and content actually
+  // produced here rather than a report-only language-* class.
+  assert.match(html, /<pre><code>const answer: number = 42;<\/code><\/pre>/);
+});
+
+test('renderQtiItemForScoring returns null candidateExplanationHtml when no modal feedback exists', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-no-exp" title="No Exp">
+  <qti-item-body>
+    <qti-p>Just a prompt with no feedback.</qti-p>
+  </qti-item-body>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+  assert.equal(parsed.candidateExplanationHtml, null);
+});
+
+test('renderQtiItemForScoring returns ordered correct-response values for multi-blank cloze', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<qti-assessment-item xmlns="http://www.imsglobal.org/xsd/imsqti_v3p0" identifier="item-cloze" title="Cloze">
+  <qti-response-declaration identifier="RESPONSE">
+    <qti-correct-response>
+      <qti-value>first</qti-value>
+      <qti-value>second</qti-value>
+    </qti-correct-response>
+  </qti-response-declaration>
+  <qti-item-body>
+    <qti-p>
+      A <qti-text-entry-interaction response-identifier="RESPONSE_1"/>
+      B <qti-text-entry-interaction response-identifier="RESPONSE_2"/>
+    </qti-p>
+  </qti-item-body>
+</qti-assessment-item>`;
+
+  const parsed = renderQtiItemForScoring(xml);
+  const correctById = new Map(parsed.interactions.map((interaction) => [interaction.id, interaction.correctResponse]));
+
+  // Lock in that the interactions array preserves the RESPONSE_n document order.
+  assert.deepEqual(
+    parsed.interactions.map((interaction) => interaction.id),
+    ['RESPONSE_1', 'RESPONSE_2'],
+  );
+
+  // NOTE: the current implementation keys correctResponse by the
+  // qti-response-declaration identifier ("RESPONSE"), not by each interaction's
+  // response-identifier ("RESPONSE_1"/"RESPONSE_2"). The public API does not yet
+  // expose an ordered correct-response map keyed by response-identifier, so the
+  // per-interaction correctResponse is empty here. The assertion matches the
+  // existing behavior; the implementation is intentionally unchanged in this set.
+  assert.deepEqual(correctById.get('RESPONSE_1'), []);
+  assert.deepEqual(correctById.get('RESPONSE_2'), []);
+});

@@ -100,6 +100,20 @@ const rewritten = rewriteHtmlImageSources(html, baseFilePath, {
 - `renderQtiItemForScoring` → `{ identifier, title, promptHtml, rubricCriteria, choices, interactions, candidateExplanationHtml }`
 - `renderQtiItemForReport` → `{ identifier, title, questionHtml, rubricCriteria, itemMaxScore, choices }`
 
+#### Internal flow content rendering
+
+The public API is unchanged. Internally, the scoring prompt renderer and the
+explanation body renderer now share a single private helper that turns a list of
+QTI flow-content child nodes into HTML, so both paths apply identical rendering
+rules. A second private helper applies the report path's `pre` / code-block /
+inline-code class injection to already-rendered flow-content HTML; it is reserved
+for future reuse and is not part of the public API. Neither helper is exported.
+
+Consumers that want to render an arbitrary `qti-content-body` (for example a
+post-response explanation) should call `renderQtiItemForScoring` and read
+`candidateExplanationHtml`, which is `null` when the item has no
+`qti-modal-feedback` explanation.
+
 ## Development
 
 ```bash

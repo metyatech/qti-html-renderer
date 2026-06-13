@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Internal
+
+- Refactor `src/index.ts` so the scoring prompt renderer and the explanation
+  body renderer share a single private `renderFlowContentChildren` helper that
+  turns a list of QTI flow-content child nodes into HTML. No public API,
+  signature, or output change.
+- Add a private, not-yet-wired `_enhanceReportCodeHtml` helper that applies the
+  report path's `pre` / code-block / inline-code class injection to
+  pre-rendered flow-content HTML, reserved for future reuse. Not exported.
+
+### Tests
+
+- Add tests covering `candidateExplanationHtml` for items with `EXPLANATION`
+  modal feedback (paragraph, inline code, code block) and `null` when no modal
+  feedback exists, plus a test locking in the `RESPONSE_n` document order of the
+  `interactions` array for a multi-blank cloze item.
+
 ## 0.1.1 — 2026-02-23
 
 ### Fixes

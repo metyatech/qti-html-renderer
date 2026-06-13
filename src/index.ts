@@ -355,6 +355,15 @@ const renderNodeForScoring = (
   }
 };
 
+// Internal-only shared helper (not exported). Turns a list of QTI flow-content
+// child nodes into HTML using the scoring render rules. Both the scoring prompt
+// renderer and the explanation body renderer go through this single code path.
+const renderFlowContentChildren = (
+  nodes: Node[],
+  options: Required<ScoringRenderOptions>,
+  blankCounter: { value: number },
+): string => nodes.map((node) => renderNodeForScoring(node, options, blankCounter)).join('');
+
 const parseCandidateExplanation = (root: Element, options: Required<ScoringRenderOptions>): string | null => {
   const modalFeedbacks = getElementsByLocalName(root, 'qti-modal-feedback');
   const explanationFeedback =
@@ -371,7 +380,7 @@ const parseCandidateExplanation = (root: Element, options: Required<ScoringRende
   const explanationNodes = Array.from(contentBody.childNodes).filter(
     (node) => node.nodeType !== NODE_TYPES.TEXT_NODE || (node.textContent?.trim() ?? '') !== '',
   );
-  return explanationNodes.map((node) => renderNodeForScoring(node, options, blankCounter)).join('');
+  return renderFlowContentChildren(explanationNodes, options, blankCounter);
 };
 
 export const renderQtiItemForScoring = (xml: string, options: ScoringRenderOptions = {}): ParsedItemForScoring => {
@@ -388,9 +397,7 @@ export const renderQtiItemForScoring = (xml: string, options: ScoringRenderOptio
     throw new Error('qti-item-body not found');
   }
   const blankCounter = { value: 0 };
-  const promptHtml = Array.from(itemBody.childNodes)
-    .map((node) => renderNodeForScoring(node, resolved, blankCounter))
-    .join('');
+  const promptHtml = renderFlowContentChildren(Array.from(itemBody.childNodes), resolved, blankCounter);
   const rubricCriteria = extractRubricCriteria(itemBody);
   const choices = extractChoices(itemBody);
   const interactions = extractInteractions(root);
@@ -538,6 +545,22 @@ const enhanceInlineCode = (
     if (!language) return enhancedCode;
     return addOrUpdateAttribute(enhancedCode, options.dataCodeLangAttribute, normalizeLanguageForReport(language));
   });
+};
+
+// Internal-only helper (intentionally not exported and not wired into any public
+// path yet). Applies the report path's pre / code-block / inline-code class
+// injection to already-rendered QTI flow-content HTML, mirroring the logic used by
+// normalizePreBlocks / enhanceCodeBlocks / enhanceInlineCode in the report renderer.
+// Reserved for future report/explanation flow-content reuse; the leading "_" marks
+// it as deliberately unused for now so the linter does not flag it.
+const _enhanceReportCodeHtml = (
+  htmlFragment: string,
+  options: Required<Omit<ReportRenderOptions, 'codeHighlighter'>> = defaultReportOptions,
+  codeHighlighter?: (code: string, explicitLanguage: string | null) => CodeHighlightResult,
+): string => {
+  const normalizedPreBlocks = normalizePreBlocks(htmlFragment);
+  const withCodeBlocks = enhanceCodeBlocks(normalizedPreBlocks, options, codeHighlighter);
+  return enhanceInlineCode(withCodeBlocks, options);
 };
 
 const renderNodeForReport = (
