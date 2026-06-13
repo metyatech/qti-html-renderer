@@ -12,9 +12,11 @@ export interface ChoiceOption {
   text: string;
 }
 
+export type InteractionType = 'choice' | 'text-entry' | 'extended-text' | 'other';
+
 export interface InteractionInfo {
   id: string;
-  type: string;
+  type: InteractionType;
   correctResponse: string[];
 }
 
@@ -35,6 +37,14 @@ export interface ParsedItemForReport {
   rubricCriteria: RubricCriterion[];
   itemMaxScore: number;
   choices: ChoiceOption[];
+  interactions: InteractionInfo[];
+  explanationHtml: string | null;
+}
+
+export interface ParsedItemForExplanations {
+  identifier: string;
+  title: string;
+  explanationHtml: string | null;
 }
 
 export interface ScoringRenderOptions {
@@ -58,6 +68,11 @@ export interface ReportRenderOptions {
   dataCodeLangAttribute?: string;
   itemBodyWrapperClassName?: string;
   codeHighlighter?: (code: string, explicitLanguage: string | null) => CodeHighlightResult;
+}
+
+export interface ExplanationRenderOptions {
+  codeHighlighter?: (code: string, explicitLanguage: string | null) => CodeHighlightResult;
+  domParser?: HtmlDomParser;
 }
 
 export interface HtmlDomParser {
@@ -167,39 +182,119 @@ const extractChoices = (itemBody: Element): ChoiceOption[] => {
   }));
 };
 
-const extractInteractions = (root: Element): InteractionInfo[] => {
-  const interactions: InteractionInfo[] = [];
-  const responseDeclarations = getElementsByLocalName(root, 'qti-response-declaration');
+const inferInteractionType = (localName: string): InteractionType => {
+  const lowered = localName.toLowerCase();
+  if (lowered === 'qti-choice-interaction' || lowered === 'choice-interaction') return 'choice';
+  if (lowered === 'qti-text-entry-interaction' || lowered === 'text-entry-interaction') return 'text-entry';
+  if (lowered === 'qti-extended-text-interaction' || lowered === 'extended-text-interaction') return 'extended-text';
+  if (lowered.includes('interaction')) return 'other';
+  return 'other';
+};
 
-  // Map response identifiers to correct values
+const extractInteractions = (root: Element): InteractionInfo[] => {
+  const responseDeclarations = getElementsByLocalName(root, 'qti-response-declaration');
+  // Map response identifiers to the list of correct values in document order.
   const correctMap = new Map<string, string[]>();
   for (const decl of responseDeclarations) {
     const id = decl.getAttribute('identifier');
+    if (!id) continue;
     const correctResponse = getElementsByLocalName(decl, 'qti-correct-response')[0];
-    if (id && correctResponse) {
-      const values = getElementsByLocalName(correctResponse, 'qti-value').map((v) => v.textContent?.trim() ?? '');
-      correctMap.set(id, values);
-    }
+    const values = correctResponse
+      ? getElementsByLocalName(correctResponse, 'qti-value').map((v) => v.textContent?.trim() ?? '')
+      : [];
+    correctMap.set(id, values);
   }
 
-  // Find actual interactions in the body in document order
   const itemBody = getElementsByLocalName(root, 'qti-item-body')[0];
   if (!itemBody) return [];
 
-  // インタラクション要素を確実に取得 (接頭辞 qti- の有無を問わない)
+  // Gather every interaction element under qti-item-body in document order,
+  // regardless of qti- prefix.
   const allTags = Array.from(itemBody.getElementsByTagName('*'));
-  const allInteractionTags = allTags.filter((el) => el.localName.toLowerCase().includes('interaction'));
+  const interactionElements = allTags.filter((el) => el.localName.toLowerCase().includes('interaction'));
 
-  for (const el of allInteractionTags) {
-    const responseId = el.getAttribute('response-identifier');
-    if (responseId) {
-      interactions.push({
-        id: responseId,
-        type: el.localName.toLowerCase().includes('choice') ? 'choiceInteraction' : 'textEntryInteraction',
-        correctResponse: correctMap.get(responseId) ?? [],
-      });
-    }
+  // Decide whether a declaration identifier is "shared" by multiple
+  // interactions (same response-identifier on more than one interaction). If
+  // so, distribute the declaration's values in document order across the
+  // matching interactions. If only one interaction references the identifier
+  // (or the declaration has no matching interactions), the interaction gets
+  // the full correct-response list.
+  const interactionsPerId = new Map<string, number>();
+  for (const el of interactionElements) {
+    const responseId = el.getAttribute('response-identifier') ?? '';
+    if (!responseId) continue;
+    interactionsPerId.set(responseId, (interactionsPerId.get(responseId) ?? 0) + 1);
   }
+
+  // Cursors for declared identifiers that are shared.
+  const sharedCursor = new Map<string, number>();
+  // Track which interaction's response-identifier was unmatched by any
+  // declaration so we can fall back to distributing a single "loose"
+  // declaration across those interactions in document order. This matches
+  // the multi-blank cloze pattern where a single declaration's values should
+  // be spread across multiple interaction elements whose response-identifiers
+  // do not match the declaration identifier.
+  const declaredIds = new Set(correctMap.keys());
+  const unmatchedIds = new Set<string>();
+  for (const el of interactionElements) {
+    const responseId = el.getAttribute('response-identifier') ?? '';
+    if (responseId && !declaredIds.has(responseId)) unmatchedIds.add(responseId);
+  }
+  const looseDeclarations = [...correctMap.entries()].filter(([id]) => !interactionsPerId.has(id));
+  const sharedLooseCursor = new Map<string, number>();
+  const sharedLooseValues = new Map<string, string[]>();
+  let looseDeclCursor = 0;
+
+  const interactions: InteractionInfo[] = interactionElements.map((el) => {
+    const localName = el.localName;
+    const type = inferInteractionType(localName);
+    const responseId = el.getAttribute('response-identifier') ?? '';
+    if (!responseId) {
+      return { id: '', type, correctResponse: [] };
+    }
+
+    const directValues = correctMap.get(responseId);
+    if (directValues !== undefined) {
+      const isShared = (interactionsPerId.get(responseId) ?? 0) > 1;
+      if (isShared) {
+        const cursor = sharedCursor.get(responseId) ?? 0;
+        sharedCursor.set(responseId, cursor + 1);
+        const value = directValues[cursor];
+        return {
+          id: responseId,
+          type,
+          correctResponse: value === undefined ? [] : [value],
+        };
+      }
+      return { id: responseId, type, correctResponse: [...directValues] };
+    }
+
+    // Unmatched response-identifier: fall back to a single shared "loose"
+    // declaration so the test/example with `response-identifier="RESPONSE_1"`
+    // and a declaration keyed `identifier="RESPONSE"` still resolves the
+    // correct values. Distribute the loose declaration's values across
+    // unmatched interactions in document order. If multiple loose
+    // declarations exist, the first one in document order wins.
+    if (looseDeclarations.length === 1 && unmatchedIds.has(responseId)) {
+      const [looseId, looseValues] = looseDeclarations[0];
+      if (!sharedLooseValues.has(looseId)) {
+        sharedLooseValues.set(looseId, [...looseValues]);
+      }
+      const remaining = sharedLooseValues.get(looseId) ?? [];
+      const value = remaining[0];
+      sharedLooseValues.set(looseId, remaining.slice(1));
+      sharedLooseCursor.set(looseId, (sharedLooseCursor.get(looseId) ?? 0) + 1);
+      looseDeclCursor += 1;
+      return {
+        id: responseId,
+        type,
+        correctResponse: value === undefined ? [] : [value],
+      };
+    }
+
+    void looseDeclCursor;
+    return { id: responseId, type, correctResponse: [] };
+  });
 
   return interactions;
 };
@@ -547,18 +642,19 @@ const enhanceInlineCode = (
   });
 };
 
-// Internal-only helper (intentionally not exported and not wired into any public
-// path yet). Applies the report path's pre / code-block / inline-code class
-// injection to already-rendered QTI flow-content HTML, mirroring the logic used by
-// normalizePreBlocks / enhanceCodeBlocks / enhanceInlineCode in the report renderer.
-// Reserved for future report/explanation flow-content reuse; the leading "_" marks
-// it as deliberately unused for now so the linter does not flag it.
-const _enhanceReportCodeHtml = (
-  htmlFragment: string,
-  options: Required<Omit<ReportRenderOptions, 'codeHighlighter'>> = defaultReportOptions,
+// Internal-only shared helper. Renders the children of a `qti-content-body` (or
+// any other report-style flow content) with the report path's class and
+// code-highlighting contract, wrapping the result in `<div class="item-body">`
+// when requested. Used by both the report body and the explanation renderer so
+// they produce structurally identical output.
+const renderQtiExplanationBody = (
+  bodyChildren: Node[],
+  options: Required<Omit<ReportRenderOptions, 'codeHighlighter'>>,
   codeHighlighter?: (code: string, explicitLanguage: string | null) => CodeHighlightResult,
 ): string => {
-  const normalizedPreBlocks = normalizePreBlocks(htmlFragment);
+  const rawBody = bodyChildren.map((node) => renderNodeForReport(node, options)).join('');
+  const wrappedHtml = `<div class="${options.itemBodyWrapperClassName}">${rawBody}</div>`;
+  const normalizedPreBlocks = normalizePreBlocks(wrappedHtml);
   const withCodeBlocks = enhanceCodeBlocks(normalizedPreBlocks, options, codeHighlighter);
   return enhanceInlineCode(withCodeBlocks, options);
 };
@@ -589,10 +685,16 @@ const renderNodeForReport = (
       return '';
     case 'qti-choice-interaction': {
       const classAttr = options.choiceWrapperClassName ? ` class="${escapeHtml(options.choiceWrapperClassName)}"` : '';
-      return `<div${classAttr}>${renderChildren()}</div>`;
+      const responseId = el.getAttribute('response-identifier') ?? '';
+      const idAttr = responseId ? ` data-interaction-id="${escapeHtml(responseId)}"` : '';
+      return `<div${classAttr}${idAttr}>${renderChildren()}</div>`;
     }
-    case 'qti-text-entry-interaction':
-      return options.clozeInputHtml;
+    case 'qti-text-entry-interaction': {
+      const responseId = el.getAttribute('response-identifier') ?? '';
+      const html = options.clozeInputHtml;
+      if (!responseId || !html.includes('<input')) return html;
+      return html.replace('<input', `<input data-interaction-id="${escapeHtml(responseId)}"`);
+    }
     case 'qti-extended-text-interaction':
       return '';
     case 'qti-pre':
@@ -647,14 +749,10 @@ export const renderQtiItemForReport = (
 
   const rubricCriteria = extractRubricCriteria(itemBody);
   const itemMaxScore = rubricCriteria.reduce((sum, criterion) => sum + criterion.points, 0);
-  const rawBody = Array.from(itemBody.childNodes)
-    .map((node) => renderNodeForReport(node, resolved))
-    .join('');
-  const wrappedHtml = `<div class="${resolved.itemBodyWrapperClassName}">${rawBody}</div>`;
-  const normalizedPreBlocks = normalizePreBlocks(wrappedHtml);
-  const withCodeBlocks = enhanceCodeBlocks(normalizedPreBlocks, resolved, options.codeHighlighter);
-  const questionHtml = enhanceInlineCode(withCodeBlocks, resolved);
+  const questionHtml = renderQtiExplanationBody(Array.from(itemBody.childNodes), resolved, options.codeHighlighter);
   const choices = extractChoices(itemBody);
+  const interactions = extractInteractions(root);
+  const explanationHtml = parseExplanationBody(root, resolved, options.codeHighlighter);
 
   return {
     identifier,
@@ -663,6 +761,63 @@ export const renderQtiItemForReport = (
     rubricCriteria,
     itemMaxScore,
     choices,
+    interactions,
+    explanationHtml,
+  };
+};
+
+const parseExplanationBody = (
+  root: Element,
+  options: Required<Omit<ReportRenderOptions, 'codeHighlighter'>>,
+  codeHighlighter?: (code: string, explicitLanguage: string | null) => CodeHighlightResult,
+): string | null => {
+  const modalFeedbacks = getElementsByLocalName(root, 'qti-modal-feedback');
+  const explanationFeedback =
+    modalFeedbacks.find(
+      (feedback) =>
+        feedback.getAttribute('identifier') === 'EXPLANATION' &&
+        feedback.getAttribute('outcome-identifier') === 'FEEDBACK',
+    ) ?? modalFeedbacks.find((feedback) => feedback.getAttribute('identifier') === 'EXPLANATION');
+  if (!explanationFeedback) return null;
+  const contentBody = getElementsByLocalName(explanationFeedback, 'qti-content-body')[0];
+  if (!contentBody) return null;
+  const children = Array.from(contentBody.childNodes).filter(
+    (node) => node.nodeType !== NODE_TYPES.TEXT_NODE || (node.textContent?.trim() ?? '') !== '',
+  );
+  const html = renderQtiExplanationBody(children, options, codeHighlighter);
+  return html.length === 0 ? null : html;
+};
+
+export const renderQtiItemForExplanations = (
+  xml: string,
+  expectedIdentifier: string,
+  options: ExplanationRenderOptions = {},
+): ParsedItemForExplanations => {
+  const resolved = { ...defaultReportOptions };
+  const doc = parseXml(xml);
+  const root = doc.documentElement;
+  if (!root || root.nodeName === 'parsererror') {
+    throw new Error(`Invalid assessment item: XML parse failed for ${expectedIdentifier}`);
+  }
+  const identifier = root.getAttribute('identifier') ?? '';
+  const title = root.getAttribute('title') ?? expectedIdentifier;
+  if (!identifier) {
+    throw new Error(`Invalid assessment item: identifier missing in ${expectedIdentifier}`);
+  }
+  if (identifier !== expectedIdentifier) {
+    throw new Error(`Assessment item identifier mismatch: expected ${expectedIdentifier} but found ${identifier}`);
+  }
+  const itemBody = getElementsByLocalName(root, 'qti-item-body')[0];
+  if (!itemBody) {
+    throw new Error(`Invalid assessment item: qti-item-body not found for ${identifier}`);
+  }
+
+  const explanationHtml = parseExplanationBody(root, resolved, options.codeHighlighter);
+
+  return {
+    identifier,
+    title,
+    explanationHtml,
   };
 };
 

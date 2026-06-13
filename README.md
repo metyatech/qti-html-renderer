@@ -13,6 +13,7 @@ npm install qti-html-renderer
 ```ts
 import {
   applyResponsesToPromptHtml,
+  renderQtiItemForExplanations,
   renderQtiItemForReport,
   renderQtiItemForScoring,
   rewriteHtmlImageSources,
@@ -66,7 +67,42 @@ const reportItem = renderQtiItemForReport(xml, expectedIdentifier, {
 });
 
 reportItem.questionHtml;
+reportItem.interactions; // typed InteractionInfo[] for retry / correct attach
+reportItem.explanationHtml; // null when the item has no qti-modal-feedback explanation
 ```
+
+The report body wrapper element for `qti-choice-interaction` carries a
+`data-interaction-id="<response-identifier>"` attribute, and the rendered cloze
+`<input>` (when the default or any custom template that contains `<input` is
+used) carries the same attribute. Consumers can attach correct values by id
+without re-parsing the source XML.
+
+Custom `clozeInputHtml` templates that do not contain an `<input` element are
+left untouched.
+
+### Rendering explanations
+
+When you only need the rendered explanation body (no question, no rubric),
+call `renderQtiItemForExplanations`. It applies the same
+`normalizePreBlocks` → `enhanceCodeBlocks` → `enhanceInlineCode` flow as the
+report body, so the resulting HTML has the same `code-block` /
+`code-block-code` / `code-inline` / `data-code-lang` contract.
+
+```ts
+const explanation = renderQtiItemForExplanations(xml, expectedIdentifier, {
+  codeHighlighter: (code, explicitLanguage) => ({ language: explicitLanguage ?? 'plain', html: code }),
+});
+
+explanation.explanationHtml; // null when the item has no qti-modal-feedback
+```
+
+`ExplanationRenderOptions`:
+
+- `codeHighlighter(code, explicitLanguage) => CodeHighlightResult` — optional
+  highlighter applied to `<pre><code>` blocks the same way the report path
+  applies it.
+- `domParser` — reserved for future HTML transforms; not used by the current
+  implementation.
 
 ### HTML utilities
 
@@ -98,21 +134,10 @@ const rewritten = rewriteHtmlImageSources(html, baseFilePath, {
 ### Return Types
 
 - `renderQtiItemForScoring` → `{ identifier, title, promptHtml, rubricCriteria, choices, interactions, candidateExplanationHtml }`
-- `renderQtiItemForReport` → `{ identifier, title, questionHtml, rubricCriteria, itemMaxScore, choices }`
+- `renderQtiItemForReport` → `{ identifier, title, questionHtml, rubricCriteria, itemMaxScore, choices, interactions, explanationHtml }`
+- `renderQtiItemForExplanations` → `{ identifier, title, explanationHtml }`
 
-#### Internal flow content rendering
-
-The public API is unchanged. Internally, the scoring prompt renderer and the
-explanation body renderer now share a single private helper that turns a list of
-QTI flow-content child nodes into HTML, so both paths apply identical rendering
-rules. A second private helper applies the report path's `pre` / code-block /
-inline-code class injection to already-rendered flow-content HTML; it is reserved
-for future reuse and is not part of the public API. Neither helper is exported.
-
-Consumers that want to render an arbitrary `qti-content-body` (for example a
-post-response explanation) should call `renderQtiItemForScoring` and read
-`candidateExplanationHtml`, which is `null` when the item has no
-`qti-modal-feedback` explanation.
+`InteractionInfo.type` is the typed union `'choice' | 'text-entry' | 'extended-text' | 'other'`. Both `ParsedItemForScoring.interactions` and `ParsedItemForReport.interactions` share the same array, with `correctResponse` populated from the matching `qti-response-declaration`. For shared declarations across multiple interactions, values are distributed in document order.
 
 ## Development
 

@@ -1,23 +1,30 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 — 2026-06-13
 
-### Internal
+### Added
 
-- Refactor `src/index.ts` so the scoring prompt renderer and the explanation
-  body renderer share a single private `renderFlowContentChildren` helper that
-  turns a list of QTI flow-content child nodes into HTML. No public API,
-  signature, or output change.
-- Add a private, not-yet-wired `_enhanceReportCodeHtml` helper that applies the
-  report path's `pre` / code-block / inline-code class injection to
-  pre-rendered flow-content HTML, reserved for future reuse. Not exported.
+- `renderQtiItemForExplanations(xml, expectedIdentifier, options?)` — public function that returns the explanation body rendered with the report path's flow-content + code-highlighting contract.
+- `ParsedItemForReport.interactions: InteractionInfo[]` and `ParsedItemForReport.explanationHtml: string | null` so the reporter can drive retry / correct / explanation bodies entirely from renderer output.
+- `data-interaction-id="<response-identifier>"` attribute on the report path's `choice-interaction` wrappers and cloze inputs so consumers can attach correct values by id without XML parsing.
+- `InteractionInfo.type` is now the typed union `'choice' | 'text-entry' | 'extended-text' | 'other'`.
 
-### Tests
+### Changed
 
-- Add tests covering `candidateExplanationHtml` for items with `EXPLANATION`
-  modal feedback (paragraph, inline code, code block) and `null` when no modal
-  feedback exists, plus a test locking in the `RESPONSE_n` document order of the
-  `interactions` array for a multi-blank cloze item.
+- `extractInteractions` (private) now matches each interaction's `response-identifier` to the corresponding `qti-response-declaration` and copies the declaration's `qti-value` list into the interaction's `correctResponse`. For shared declarations across multiple interactions, values are distributed in document order.
+- `InteractionInfo.type` (now exposed on both `ParsedItemForScoring` and `ParsedItemForReport`) is `'choice' | 'text-entry' | 'extended-text' | 'other'` (was the never-documented `'choiceInteraction' | 'textEntryInteraction'` strings).
+
+### Security
+
+- Bumped `@xmldom/xmldom` to `^0.9.10`.
+- Added `picomatch` override at `^4.0.4`.
+- Bumped `minimatch` override to `^10.2.3`.
+- Added `flatted` override at `^3.4.2` to clear the recursion DoS / prototype pollution advisory pulled in by the eslint v9 chain.
+- `npm audit --audit-level=high` now exits 0.
+
+### Removed
+
+- The unused private `_enhanceReportCodeHtml` helper (the explanation path now renders through the same flow as the report body).
 
 ## 0.1.1 — 2026-02-23
 
