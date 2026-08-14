@@ -1,6 +1,6 @@
 {
   "name": "qti-html-renderer",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Reusable QTI 3.0 assessment item HTML rendering utilities.",
   "license": "MIT",
   "repository": {
@@ -53,7 +53,7 @@
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.10",
-    "qti-xml-core": "git+https://github.com/metyatech/qti-xml-core.git"
+    "qti-xml-core": "git+https://github.com/metyatech/qti-xml-core.git#b3f389a2cec7cd9429b4d5dcf5efeaff3b5a9c75"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

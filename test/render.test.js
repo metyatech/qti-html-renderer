@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import {
   applyResponsesToPromptHtml,
@@ -8,6 +9,20 @@ import {
   renderQtiItemForScoring,
   rewriteHtmlImageSources,
 } from '../dist/index.js';
+
+const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+test('GitHub git dependencies are pinned to full commit SHAs', () => {
+  const dependencySections = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
+
+  for (const section of dependencySections) {
+    for (const [name, spec] of Object.entries(packageJson[section] ?? {})) {
+      if (typeof spec === 'string' && spec.startsWith('git+https://github.com/')) {
+        assert.match(spec, /#[0-9a-f]{40}$/i, `${section}.${name} must end with a full 40-character commit SHA`);
+      }
+    }
+  }
+});
 
 test('renderQtiItemForScoring renders blanks and choices', () => {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>

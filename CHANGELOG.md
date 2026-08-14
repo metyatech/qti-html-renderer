@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-08-14
+
+### Fixed
+
+- Pin the `qti-xml-core` Git dependency to commit
+  `b3f389a2cec7cd9429b4d5dcf5efeaff3b5a9c75` for reproducible installs.
+
 ## 0.2.0 — 2026-08-14
 
 ### Breaking

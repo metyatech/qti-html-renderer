@@ -244,24 +244,17 @@ npm run format
 
 ## Release
 
-This package is published **only** by GitHub Actions through npm Trusted
-Publisher (OIDC). Local `npm publish` is not allowed, and no npm token is
-required or used anywhere (no `NPM_TOKEN`, no `NODE_AUTH_TOKEN`, no token in
-`.npmrc`).
+This package is published to npm with `npm publish --access public` after the
+release commit has been pushed. An authenticated npm session is required.
 
 Release steps:
 
 1. Set the same version in `package.json`, `package-lock.json`, and
    `CHANGELOG.md`.
 2. Push the change to `main` and wait for the normal CI to pass.
-3. Create and push the matching `v<version>` annotated tag (for example
-   `v0.2.0`).
-4. The tag push triggers `.github/workflows/publish.yml`, which automatically
-   verifies tag/version agreement and package contents, publishes via OIDC,
-   and re-verifies the published artifact from the registry.
-
-An already-published version cannot be re-published; the workflow fails before
-publish if the version already exists on the registry.
+3. Run `npm publish --access public`.
+4. Create and push the matching `v<version>` annotated tag (for example
+   `v0.2.1`), then verify the tag points to the release commit.
 
 ## Maintenance and Policies
 
