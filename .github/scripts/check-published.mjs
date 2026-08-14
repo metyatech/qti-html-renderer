@@ -137,15 +137,15 @@ if (!choice || choice.declarationIdentifier !== null || choice.correctResponse.l
   fail('duplicate declaration must not bind');
 }
 
-// 10) qti-br renders in both the scoring and report paths.
+// 10) bare br renders in both the scoring and report paths.
 const xmlBr = `<?xml version="1.0" encoding="UTF-8"?>
 <qti-assessment-item ${NS} identifier="item-br" title="Br">
-  <qti-item-body><qti-p>line1<qti-br/>line2</qti-p></qti-item-body>
+  <qti-item-body><p>line1<br/>line2</p></qti-item-body>
 </qti-assessment-item>`;
 const scoring = renderQtiItemForScoring(xmlBr);
-if (!scoring.promptHtml.includes('<br')) fail('scoring path did not render qti-br as <br');
+if (!scoring.promptHtml.includes('<br')) fail('scoring path did not render bare br as <br');
 const report = renderQtiItemForReport(xmlBr, 'item-br');
-if (!report.questionHtml.includes('<br')) fail('report path did not render qti-br as <br');
+if (!report.questionHtml.includes('<br')) fail('report path did not render bare br as <br');
 
 // 11) Published tarball contains exactly the 6 allowed files.
 const packDir = mkdtempSync(join(baseTmp, 'qhr-pack-'));

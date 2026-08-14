@@ -119,11 +119,9 @@ const NODE_TYPES = {
 };
 
 // Local names that render to something visible on their own, even with no
-// children (void / self-displaying elements). Only the qti- prefixed QTI
-// spellings are accepted; bare HTML spellings (img, hr, br) are not in
-// the QTI 3.0 item body vocabulary and are not treated as meaningful on
-// their own.
-const SELF_DISPLAYING_LOCAL_NAMES = new Set(['qti-img', 'qti-hr', 'qti-br']);
+// children (void / self-displaying HTML elements).
+const SELF_DISPLAYING_LOCAL_NAMES = new Set(['img', 'hr', 'br']);
+const VOID_HTML_LOCAL_NAMES = new Set(['img', 'hr', 'br']);
 
 // Local names that every renderer in this module converts to an empty string,
 // regardless of their descendants. They never contribute meaningful content.
@@ -133,7 +131,7 @@ const RENDERS_EMPTY_LOCAL_NAMES = new Set(['qti-rubric-block']);
 // Rules:
 //   - a non-whitespace text node is meaningful
 //   - comment / processing-instruction nodes are ignored
-//   - self-displaying elements (qti-img, qti-hr, qti-br) are meaningful by themselves
+//   - self-displaying elements (img, hr, br) are meaningful by themselves
 //   - elements every renderer collapses to '' are never meaningful
 //   - container elements (p, div, list, table, ...) are meaningful only when a
 //     descendant is meaningful
@@ -177,13 +175,28 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const serializeAttributes = (el: Element): string => {
+const serializeAttributes = (el: Element, extraClassNames: string[] = []): string => {
+  const classesToAdd = extraClassNames.flatMap((className) => className.split(/\s+/)).filter(Boolean);
+  let hasClassAttribute = false;
   const attributes = Array.from(el.attributes)
     .filter((attr) => !(attr.name === 'xmlns' || attr.name.startsWith('xmlns:')))
-    .map((attr) => ` ${attr.name}="${escapeHtml(attr.value)}"`)
+    .map((attr) => {
+      if (attr.name === 'class' && classesToAdd.length > 0) {
+        hasClassAttribute = true;
+        const classes = [...new Set([...attr.value.split(/\s+/).filter(Boolean), ...classesToAdd])].join(' ');
+        return ` ${attr.name}="${escapeHtml(classes)}"`;
+      }
+      return ` ${attr.name}="${escapeHtml(attr.value)}"`;
+    })
     .join('');
+  if (classesToAdd.length > 0 && !hasClassAttribute) {
+    return `${attributes} class="${escapeHtml(classesToAdd.join(' '))}"`;
+  }
   return attributes;
 };
+
+const hasDescendantWithLocalName = (root: Element, localName: string): boolean =>
+  Array.from(root.getElementsByTagName('*')).some((element) => element.localName === localName);
 
 const getElementsByLocalName = (root: Element, localName: string) => {
   const withNamespace = Array.from(root.getElementsByTagNameNS('*', localName));
@@ -204,7 +217,7 @@ const extractRubricCriteria = (itemBody: Element): RubricCriterion[] => {
   const rubricBlocks = getElementsByLocalName(itemBody, 'qti-rubric-block');
   const scorer = rubricBlocks.find((block) => block.getAttribute('view') === 'scorer');
   if (!scorer) return [];
-  const lines = getElementsByLocalName(scorer, 'qti-p');
+  const lines = getElementsByLocalName(scorer, 'p');
   const criteria: RubricCriterion[] = [];
   for (const line of lines) {
     const text = line.textContent?.trim() ?? '';
@@ -489,102 +502,20 @@ const renderNodeForScoring = (
       .join('');
 
   switch (name) {
-    case 'qti-p':
-      return `<p>${renderChildren()}</p>`;
-    case 'qti-h3':
-    case 'qti-h4':
-    case 'qti-h5':
-    case 'qti-h6': {
-      const level = name.slice(-2);
-      return `<${level}>${renderChildren()}</${level}>`;
+    case 'pre': {
+      const hasBlank = hasDescendantWithLocalName(el, 'qti-text-entry-interaction');
+      const attrs = serializeAttributes(el, hasBlank ? [options.preWithBlanksClassName] : []);
+      return `<pre${attrs}>${renderChildren(true, false)}</pre>`;
     }
-    case 'qti-em':
-      return `<em>${renderChildren()}</em>`;
-    case 'qti-strong':
-      return `<strong>${renderChildren()}</strong>`;
-    case 'qti-del':
-      return `<del>${renderChildren()}</del>`;
-    case 'qti-a': {
-      const href = el.getAttribute('href');
-      const title = el.getAttribute('title');
-      const hrefAttr = href ? ` href="${escapeHtml(href)}"` : '';
-      const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-      return `<a${hrefAttr}${titleAttr}>${renderChildren()}</a>`;
+    case 'code': {
+      const attrs = serializeAttributes(el);
+      return `<code${attrs}>${renderChildren(inPre, true)}</code>`;
     }
-    case 'qti-code':
-      return `<code>${renderChildren(inPre, true)}</code>`;
-    case 'qti-pre': {
-      const isBlank = (child: Node) =>
-        child.nodeType === NODE_TYPES.ELEMENT_NODE && (child as Element).localName === 'qti-text-entry-interaction';
-      const significantNodes = Array.from(el.childNodes).filter((child) => {
-        if (child.nodeType !== NODE_TYPES.TEXT_NODE) return true;
-        return (child.textContent ?? '').trim() !== '';
-      });
-      const renderCodeInPre = (codeEl: Element, trimStart: boolean, trimEnd: boolean) => {
-        let inner = Array.from(codeEl.childNodes)
-          .map((child) => renderNodeForScoring(child, options, blankCounter, true, true))
-          .join('');
-        if (trimStart) {
-          const leading = inner.match(/^\s+/)?.[0] ?? '';
-          if (leading && !leading.includes('\n') && !leading.includes('\r')) {
-            inner = inner.slice(leading.length);
-          }
-        }
-        if (trimEnd) {
-          const trailing = inner.match(/\s+$/)?.[0] ?? '';
-          if (trailing && !trailing.includes('\n') && !trailing.includes('\r')) {
-            inner = inner.slice(0, inner.length - trailing.length);
-          }
-        }
-        return `<code>${inner}</code>`;
-      };
-      const hasBlank = significantNodes.some((child) => isBlank(child));
-      const rendered = significantNodes
-        .map((child, index) => {
-          if (child.nodeType === NODE_TYPES.ELEMENT_NODE && (child as Element).localName === 'qti-code') {
-            const prevBlank = index > 0 && isBlank(significantNodes[index - 1]);
-            const nextBlank = index < significantNodes.length - 1 && isBlank(significantNodes[index + 1]);
-            return renderCodeInPre(child as Element, prevBlank, nextBlank);
-          }
-          return renderNodeForScoring(child, options, blankCounter, true, false);
-        })
-        .join('');
-      const classAttr = hasBlank ? ` class="${options.preWithBlanksClassName}"` : '';
-      return `<pre${classAttr}>${rendered}</pre>`;
-    }
-    case 'qti-blockquote':
-      return `<blockquote>${renderChildren()}</blockquote>`;
-    case 'qti-ul':
-      return `<ul>${renderChildren()}</ul>`;
-    case 'qti-ol': {
-      const start = el.getAttribute('start');
-      const startAttr = start ? ` start="${escapeHtml(start)}"` : '';
-      return `<ol${startAttr}>${renderChildren()}</ol>`;
-    }
-    case 'qti-li':
-      return `<li>${renderChildren()}</li>`;
-    case 'qti-table':
-      return `<table>${renderChildren()}</table>`;
-    case 'qti-thead':
-      return `<thead>${renderChildren()}</thead>`;
-    case 'qti-tbody':
-      return `<tbody>${renderChildren()}</tbody>`;
-    case 'qti-tr':
-      return `<tr>${renderChildren()}</tr>`;
-    case 'qti-th':
-      return `<th>${renderChildren()}</th>`;
-    case 'qti-td':
-      return `<td>${renderChildren()}</td>`;
-    case 'qti-hr':
-      return '<hr />';
-    case 'qti-br':
-      return '<br />';
-    case 'qti-img': {
-      const src = el.getAttribute('src') ?? '';
-      const alt = el.getAttribute('alt') ?? '';
-      const title = el.getAttribute('title');
-      const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-      return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${titleAttr} />`;
+    case 'img':
+    case 'br':
+    case 'hr': {
+      const attrs = serializeAttributes(el);
+      return `<${name}${attrs} />`;
     }
     case 'qti-text-entry-interaction': {
       const idx = ++blankCounter.value;
@@ -614,8 +545,14 @@ const renderNodeForScoring = (
     }
     case 'qti-rubric-block':
       return '';
-    default:
+    case 'qti-content-body':
       return renderChildren();
+    default:
+      if (name.startsWith('qti-')) return renderChildren();
+      {
+        const attrs = serializeAttributes(el);
+        return `<${name}${attrs}>${renderChildren()}</${name}>`;
+      }
   }
 };
 
@@ -696,15 +633,6 @@ const parseAttributes = (tagOpen: string): Record<string, string> => {
   return attributes;
 };
 
-const extractInnerXml = (tagBlock: string, tagName: string): string => {
-  const pattern = new RegExp(`^<${tagName}\\b[^>]*>([\\s\\S]*?)</${tagName}>$`);
-  const match = tagBlock.match(pattern);
-  if (!match) {
-    throw new Error(`Invalid XML: could not extract inner XML for ${tagName}`);
-  }
-  return match[1];
-};
-
 const addOrUpdateAttribute = (tagOpen: string, attributeName: string, attributeValue: string): string => {
   const attributePattern = new RegExp(`\\s${attributeName}="[^"]*"`);
   if (attributePattern.test(tagOpen)) {
@@ -742,26 +670,6 @@ const normalizeLanguageForReport = (language: string): string => {
   return normalized;
 };
 
-const normalizePreBlocks = (htmlFragment: string): string => {
-  const prePattern = /<pre\b[^>]*>[\s\S]*?<\/pre>/g;
-  return htmlFragment.replace(prePattern, (preBlock) => {
-    const preOpenMatch = preBlock.match(/^<pre\b[^>]*>/);
-    if (!preOpenMatch) return preBlock;
-    const preOpen = preOpenMatch[0];
-    let inner: string;
-    try {
-      inner = extractInnerXml(preBlock, 'pre');
-    } catch {
-      return preBlock;
-    }
-    const firstCodeOpenMatch = inner.match(/<code\b[^>]*>/);
-    if (!firstCodeOpenMatch) return preBlock;
-    const firstCodeOpen = firstCodeOpenMatch[0];
-    const withoutCodeTags = inner.replace(/<\/?code\b[^>]*>/g, '');
-    return `${preOpen}${firstCodeOpen}${withoutCodeTags}</code></pre>`;
-  });
-};
-
 const enhanceCodeBlocks = (
   htmlFragment: string,
   options: Required<Omit<ReportRenderOptions, 'codeHighlighter'>>,
@@ -772,7 +680,8 @@ const enhanceCodeBlocks = (
     const explicitLanguage = detectCodeLanguageFromOpenTag(codeOpen);
     let language = explicitLanguage ? normalizeLanguageForReport(explicitLanguage) : 'plain';
     let content = codeContent;
-    if (codeHighlighter) {
+    const containsChildElementMarkup = /<[A-Za-z][^>]*>/.test(codeContent);
+    if (codeHighlighter && !containsChildElementMarkup) {
       const highlighted = codeHighlighter(decodeXmlEntities(codeContent), explicitLanguage);
       language = normalizeLanguageForReport(highlighted.language ?? language);
       content = highlighted.html.length > 0 ? highlighted.html : codeContent;
@@ -821,8 +730,7 @@ const renderQtiExplanationBody = (
 ): string => {
   const rawBody = bodyChildren.map((node) => renderNodeForReport(node, options)).join('');
   const wrappedHtml = `<div class="${options.itemBodyWrapperClassName}">${rawBody}</div>`;
-  const normalizedPreBlocks = normalizePreBlocks(wrappedHtml);
-  const withCodeBlocks = enhanceCodeBlocks(normalizedPreBlocks, options, codeHighlighter);
+  const withCodeBlocks = enhanceCodeBlocks(wrappedHtml, options, codeHighlighter);
   return enhanceInlineCode(withCodeBlocks, options);
 };
 
@@ -864,29 +772,29 @@ const renderNodeForReport = (
     }
     case 'qti-extended-text-interaction':
       return '';
-    case 'qti-pre':
     case 'pre': {
       const attrs = serializeAttributes(el);
       return `<pre${attrs}>${renderChildren(true, false)}</pre>`;
     }
-    case 'qti-code':
     case 'code': {
       const attrs = serializeAttributes(el);
       return `<code${attrs}>${renderChildren(inPre, true)}</code>`;
     }
-    case 'qti-img':
     case 'img': {
       const attrs = serializeAttributes(el);
       return `<img${attrs} />`;
     }
-    case 'qti-hr':
     case 'hr':
-      return '<hr />';
-    case 'qti-br':
-      return '<br />';
+    case 'br': {
+      const attrs = serializeAttributes(el);
+      return `<${name}${attrs} />`;
+    }
+    case 'qti-content-body':
+      return renderChildren();
     default: {
       const tagName = name.startsWith('qti-') ? name.slice(4) : name;
       const attrs = serializeAttributes(el);
+      if (VOID_HTML_LOCAL_NAMES.has(tagName)) return `<${tagName}${attrs} />`;
       return `<${tagName}${attrs}>${renderChildren()}</${tagName}>`;
     }
   }

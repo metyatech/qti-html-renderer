@@ -20,6 +20,20 @@ import {
 } from 'qti-html-renderer';
 ```
 
+### Canonical QTI 3 presentation content
+
+QTI 3 presentation content uses ordinary HTML elements such as `p`, `div`,
+`span`, `em`, `strong`, `a`, `pre`, `code`, lists, tables, `img`, `br`, and
+`hr`. Their authored attributes and child order are preserved in the rendered
+HTML; `xmlns` declarations are omitted from emitted fragments. QTI-specific
+elements remain qti-prefixed, including interactions, `qti-content-body`, and
+`qti-rubric-block`.
+
+Code blocks use the canonical structure `<pre><code>...</code></pre>`. A
+configured `codeHighlighter` is used for text-only code. When a code block
+contains nested HTML markup, its authored children are preserved and are not
+replaced by highlighter output.
+
 ### Rendering for scoring UI
 
 Use this when you need prompt HTML, rubric criteria, choices, and optional explanation.
@@ -149,15 +163,13 @@ explanation.explanationHtml; // null when the item has no qti-modal-feedback
 `qti-content-body`, or the body is empty / contains only whitespace text
 nodes / contains only XML comments. The meaningful-content check is kept in
 sync with what the report and scoring renderers actually emit, so an
-explanation body whose only content is one of the QTI-prefixed
-self-displaying elements `qti-img`, `qti-hr`, or `qti-br` is reported as
-meaningful (non-`null`, non-empty HTML) in both
+explanation body whose only content is one of the self-displaying HTML
+elements `img`, `hr`, or `br` is reported as meaningful (non-`null`, non-empty
+HTML) in both
 `renderQtiItemForExplanations.explanationHtml` and
-`renderQtiItemForScoring.candidateExplanationHtml`. Bare HTML `img`, `hr`,
-and `br` spellings are not in the QTI 3.0 item body vocabulary and are not
-treated as meaningful on their own. Conversely, a body that contains only
-`qti-rubric-block` (which every renderer collapses to `''`) or only empty
-container elements (`qti-p`, `qti-div`, lists, tables) is still reported as
+`renderQtiItemForScoring.candidateExplanationHtml`. Conversely, a body that
+contains only `qti-rubric-block` (which every renderer collapses to `''`) or
+only empty container elements (`p`, `div`, lists, tables) is still reported as
 `null` in both paths.
 
 ### HTML utilities
@@ -243,7 +255,7 @@ Release steps:
    `CHANGELOG.md`.
 2. Push the change to `main` and wait for the normal CI to pass.
 3. Create and push the matching `v<version>` annotated tag (for example
-   `v0.1.3`).
+   `v0.2.0`).
 4. The tag push triggers `.github/workflows/publish.yml`, which automatically
    verifies tag/version agreement and package contents, publishes via OIDC,
    and re-verifies the published artifact from the registry.

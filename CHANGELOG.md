@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0 — 2026-08-14
+
+### Breaking
+
+- Migrate presentation content to canonical QTI 3 representation: ordinary
+  HTML elements are now authored and rendered as bare HTML tags. The retired
+  qti-prefixed presentation dialect is no longer accepted.
+- Canonical code blocks use `<pre><code>...</code></pre>`. Rich child markup is
+  preserved, and syntax highlighting is limited to text-only code blocks.
+
+### Changed
+
+- Preserve authored HTML attributes, including `style`, `class`, `id`, `data-*`,
+  `aria-*`, and element-specific attributes, while excluding `xmlns`
+  declarations from emitted fragments.
+- Scorer rubric criteria are read from `qti-rubric-block > p`.
+- Bare `img`, `br`, and `hr` are meaningful self-displaying content and render
+  as void HTML elements.
+
 ## 0.1.3 — 2026-06-13
 
 ### Added
@@ -17,12 +36,12 @@
   - The legacy ordered `RESPONSE` distribution gate now requires `declarationByIdentifier.size === 1` in addition to the raw `responseDeclarations.length === 1` check, and the `soleDeclaration` lookup is undefined-checked before being passed to `isLegacyOrderedResponse()`. This guards against a `Map.size` check that would otherwise pass when multiple `qti-response-declaration` elements share an identifier (they collapse to a single `Map` entry) and against the type-narrowing assumption that `[...declarationByIdentifier.values()][0]` is non-`undefined`.
   - Declarations whose `identifier` attribute is missing or empty are skipped silently: they are not added to `declarationByIdentifier`, the function does not throw, and any matching interaction is reported as unmatched (`declarationIdentifier: null`, `declarationValueIndex: null`, `cardinality: null`, `baseType: null`, `correctResponse: []`).
 - `correctResponse` values are normalized per declaration `base-type`. All newline styles are normalized to `\n`. `base-type="string"` preserves surrounding whitespace, indentation, and blank lines; every other base-type (`identifier`, `boolean`, `integer`, `float`, ..., and the unspecified case) is trimmed of surrounding whitespace.
-- The report path (`renderQtiItemForReport`) now emits a self-displaying `<br />` for `qti-br` in addition to the existing `qti-hr` and `qti-img` cases, matching the scoring / explanation flow-content renderer. The `default` branch in `renderNodeForReport` would otherwise serialize `qti-br` as `<br></br>`.
-- The meaningful-content check (`isMeaningfulNode`) is kept in sync with what the report and scoring renderers actually emit: the `SELF_DISPLAYING_LOCAL_NAMES` set now contains only the QTI-prefixed self-displaying elements `qti-img`, `qti-hr`, and `qti-br`. Bare `img`, `hr`, `br` spellings are not in the QTI 3.0 item body vocabulary and are not treated as meaningful on their own. An explanation body whose only content is `<qti-br/>`, `<qti-hr/>`, or `<qti-img/>` is reported as meaningful (non-`null`, non-empty HTML) in both `renderQtiItemForExplanations.explanationHtml` and `renderQtiItemForScoring.candidateExplanationHtml`.
+- The report path emits self-displaying `<br />` in addition to the existing `<hr />` and `<img />` cases, matching the scoring / explanation flow-content renderer.
+- The meaningful-content check (`isMeaningfulNode`) is kept in sync with what the report and scoring renderers actually emit: bare `img`, `hr`, and `br` are meaningful on their own.
 
 ### Fixed
 
-- Empty / whitespace-only / comment-only `qti-content-body` now returns `explanationHtml: null` (and `candidateExplanationHtml: null`) instead of an empty wrapper. Meaningfulness is now determined recursively: a non-whitespace text node or a self-displaying element (`qti-img`, `qti-hr`, `qti-br`) anywhere in the body counts as content, while containers (`p`, `div`, lists, tables) that recurse to nothing — and elements every renderer collapses to `''` (`qti-rubric-block`) — do not.
+- Empty / whitespace-only / comment-only `qti-content-body` now returns `explanationHtml: null` (and `candidateExplanationHtml: null`) instead of an empty wrapper. Meaningfulness is now determined recursively: a non-whitespace text node or a self-displaying element (`img`, `hr`, `br`) anywhere in the body counts as content, while containers (`p`, `div`, lists, tables) that recurse to nothing — and elements every renderer collapses to `''` (`qti-rubric-block`) — do not.
 - Duplicate `<qti-response-declaration>` handling. When two or more `qti-response-declaration` elements share the same `identifier`, the structure is ambiguous and the renderer no longer silently picks one and discards the others. The duplicate count is tracked per identifier; the affected identifier is removed from the trusted direct-match set, and the binding loop now refuses to honor a direct match on a duplicated identifier. The interaction is reported as unmatched (`declarationIdentifier: null`, `declarationValueIndex: null`, `cardinality: null`, `baseType: null`, `correctResponse: []`). The legacy ordered `RESPONSE` distribution gating also now uses `responseDeclarations.length === 1` (raw XML element count) rather than the size of the identifier-keyed `Map`, because two declarations sharing an identifier collapse to a single `Map` entry and would otherwise pass an equality test the XML does not actually satisfy.
 
 ### Security
