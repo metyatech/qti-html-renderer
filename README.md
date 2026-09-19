@@ -258,7 +258,6 @@ Release steps:
 
 ## Maintenance and Policies
 
-- [SECURITY.md](SECURITY.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [LICENSE](LICENSE)
 - [CHANGELOG.md](CHANGELOG.md)
