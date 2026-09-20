@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 # Opt the JavaScript actions (checkout, setup-node) onto the Node.js 24 runtime
 # ahead of GitHub forcing it as the default on 2026-06-16. Remove this once that
